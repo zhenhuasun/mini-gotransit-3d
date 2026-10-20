@@ -1,0 +1,43 @@
+name: Daily GO GTFS refresh
+
+# Downloads the official Metrolinx GO-GTFS.zip, builds a 3-day full-fidelity
+# slim package (window = today + next 2 days, America/Toronto), and overwrites
+# the stable file gtfs/GO-GTFS-slim.zip that Mini GO Transit 3D reads.
+# The app URL never changes; only the content rolls forward.
+# If the build fails its integrity checks, the previous file stays in place
+# (the 3-day window absorbs a missed run).
+
+on:
+  schedule:
+    - cron: "0 8 * * *" # 04:00 EDT / 03:00 EST (Toronto), after overnight service ends
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build 3-day slim GTFS
+        run: python3 tools/slim_gtfs.py --output gtfs/GO-GTFS-slim.zip --days 3
+
+      - name: Commit if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add gtfs/GO-GTFS-slim.zip
+          if git diff --cached --quiet; then
+            echo "No change - GTFS data identical to yesterday's cut"
+          else
+            git commit -m "Daily GTFS slim refresh ($(TZ=America/Toronto date +%F))"
+            git push
+          fi
