@@ -3432,20 +3432,23 @@ export default class extends Evented {
                 if (object.type === 'bus') {
                     me.updateBusTripHighlight(object);
                     me.updateBusRouteHighlight(object.gtfsId, object.trip.route);
-                    // DEBUG (temporary): render probe, deferred 2 frames so the map repaints
+                    // DEBUG (temporary): source probe — are the route shapes in the source?
                     try {
-                        const layerId = 'busroute-highlighted-' + object.gtfsId + '-og-',
-                            baseId = 'busroute-' + object.gtfsId + '-og-';
-                        requestAnimationFrame(() => requestAnimationFrame(() => {
-                            try {
-                                const layer = map.getLayer(layerId),
-                                    pt = map.project(object.coord),
-                                    qh = map.queryRenderedFeatures(pt, {layers: [layerId]}).length,
-                                    qb = map.queryRenderedFeatures(pt, {layers: [baseId]}).length;
-                                document.title = '[dbg render] ' + object.gtfsId + ' ' + object.trip.route + ' L=' + (layer ? 1 : 0) + ' V=' + (layer ? map.getLayoutProperty(layerId, 'visibility') : '-') + ' QH=' + qh + ' QB=' + qb;
-                            } catch (e) { document.title = '[dbg render] ERR ' + (e && e.message ? e.message : e); }
-                        }));
-                    } catch (e) { document.title = '[dbg render] ERR ' + (e && e.message ? e.message : e); }
+                        const tripFeat = map.querySourceFeatures(object.gtfsId, {filter: ['==', ['get', 'id'], object.trip.shape]}),
+                            gtfs = me.gtfs.get(object.gtfsId),
+                            route = gtfs ? gtfs.routes.get(object.trip.route) : null,
+                            srcIds = new Set(map.querySourceFeatures(object.gtfsId).map(f => f.properties.id));
+                        let inSrc = 0;
+                        if (route) {
+                            for (const s of route.shapes) {
+                                if (srcIds.has(s)) {
+                                    inSrc++;
+                                }
+                            }
+                        }
+                        const p = tripFeat.length ? tripFeat[0].properties : null;
+                        document.title = '[dbg src] ' + object.trip.route + ' tripInSrc=' + tripFeat.length + ' w=' + (p ? p.width : '-') + ' c=' + (p ? p.color : '-') + ' routeInSrc=' + inSrc + '/' + (route ? route.shapes.length : '-');
+                    } catch (e) { document.title = '[dbg src] ERR ' + (e && e.message ? e.message : e); }
                 }
             } else {
                 me.addStationOutline(object, 'stations-marked');
