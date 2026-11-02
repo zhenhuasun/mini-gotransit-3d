@@ -3413,7 +3413,6 @@ export default class extends Evented {
                 trafficLayer.markObject();
                 if (markedObject.type === 'bus') {
                     me.updateBusTripHighlight(markedObject);
-                    me.updateBusRouteHighlight();
                 }
             } else {
                 me.removeStationOutline('stations-marked');
@@ -3431,24 +3430,6 @@ export default class extends Evented {
                 trafficLayer.markObject(object);
                 if (object.type === 'bus') {
                     me.updateBusTripHighlight(object);
-                    me.updateBusRouteHighlight(object.gtfsId, object.trip.route);
-                    // DEBUG (temporary): source probe — are the route shapes in the source?
-                    try {
-                        const tripFeat = map.querySourceFeatures(object.gtfsId, {filter: ['==', ['get', 'id'], object.trip.shape]}),
-                            gtfs = me.gtfs.get(object.gtfsId),
-                            route = gtfs ? gtfs.routes.get(object.trip.route) : null,
-                            srcIds = new Set(map.querySourceFeatures(object.gtfsId).map(f => f.properties.id));
-                        let inSrc = 0;
-                        if (route) {
-                            for (const s of route.shapes) {
-                                if (srcIds.has(s)) {
-                                    inSrc++;
-                                }
-                            }
-                        }
-                        const p = tripFeat.length ? tripFeat[0].properties : null;
-                        document.title = '[dbg src] ' + object.trip.route + ' tripInSrc=' + tripFeat.length + ' w=' + (p ? p.width : '-') + ' c=' + (p ? p.color : '-') + ' routeInSrc=' + inSrc + '/' + (route ? route.shapes.length : '-');
-                    } catch (e) { document.title = '[dbg src] ERR ' + (e && e.message ? e.message : e); }
                 }
             } else {
                 me.addStationOutline(object, 'stations-marked');
@@ -3860,10 +3841,6 @@ export default class extends Evented {
 
             for (const id of route.shapes) {
                 map.setFeatureState({source: gtfsId, id}, {'route-highlight': route.color || gtfs.color});
-            }
-            // DEBUG (temporary): read the state back to see if it stuck
-            if (route.shapes.length > 0) {
-                document.title = '[dbg hl] ' + gtfsId + ' ' + routeId + ' n=' + route.shapes.length + ' ' + (route.color || gtfs.color) + ' state=' + JSON.stringify(map.getFeatureState({source: gtfsId, id: route.shapes[0]}));
             }
         } else {
             for (const gtfs of me.gtfs.values()) {
