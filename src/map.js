@@ -3430,10 +3430,22 @@ export default class extends Evented {
                 me.updateObjectPosition(object);
                 trafficLayer.markObject(object);
                 if (object.type === 'bus') {
-                    // DEBUG (temporary): title survives production strip()
-                    document.title = '[dbg mark] ' + object.gtfsId + ' ' + object.trip.route + ' ' + object.trip.shape;
                     me.updateBusTripHighlight(object);
                     me.updateBusRouteHighlight(object.gtfsId, object.trip.route);
+                    // DEBUG (temporary): render probe, deferred 2 frames so the map repaints
+                    try {
+                        const layerId = 'busroute-highlighted-' + object.gtfsId + '-og-',
+                            baseId = 'busroute-' + object.gtfsId + '-og-';
+                        requestAnimationFrame(() => requestAnimationFrame(() => {
+                            try {
+                                const layer = map.getLayer(layerId),
+                                    pt = map.project(object.position),
+                                    qh = map.queryRenderedFeatures(pt, {layers: [layerId]}).length,
+                                    qb = map.queryRenderedFeatures(pt, {layers: [baseId]}).length;
+                                document.title = '[dbg render] ' + object.gtfsId + ' ' + object.trip.route + ' L=' + (layer ? 1 : 0) + ' V=' + (layer ? map.getLayoutProperty(layerId, 'visibility') : '-') + ' QH=' + qh + ' QB=' + qb;
+                            } catch (e) { /* keep hover working */ }
+                        }));
+                    } catch (e) { /* keep hover working */ }
                 }
             } else {
                 me.addStationOutline(object, 'stations-marked');
