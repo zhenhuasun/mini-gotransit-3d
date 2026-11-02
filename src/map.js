@@ -3439,13 +3439,13 @@ export default class extends Evented {
                         requestAnimationFrame(() => requestAnimationFrame(() => {
                             try {
                                 const layer = map.getLayer(layerId),
-                                    pt = map.project(object.position),
+                                    pt = map.project(object.coord),
                                     qh = map.queryRenderedFeatures(pt, {layers: [layerId]}).length,
                                     qb = map.queryRenderedFeatures(pt, {layers: [baseId]}).length;
                                 document.title = '[dbg render] ' + object.gtfsId + ' ' + object.trip.route + ' L=' + (layer ? 1 : 0) + ' V=' + (layer ? map.getLayoutProperty(layerId, 'visibility') : '-') + ' QH=' + qh + ' QB=' + qb;
-                            } catch (e) { /* keep hover working */ }
+                            } catch (e) { document.title = '[dbg render] ERR ' + (e && e.message ? e.message : e); }
                         }));
-                    } catch (e) { /* keep hover working */ }
+                    } catch (e) { document.title = '[dbg render] ERR ' + (e && e.message ? e.message : e); }
                 }
             } else {
                 me.addStationOutline(object, 'stations-marked');
