@@ -2453,7 +2453,7 @@ export default class extends Evented {
             map = me.map,
             gtfsSources = me.dataSources.filter(source => source.gtfsUrl && !isExpired(source)),
             sourceIds = new Set(gtfsSources.map(({id}) => id)),
-            deleteGtfs = ({id, activeBusLookup, layerIds, routeGroupIndex, colorGroupIndex}) => {
+            deleteGtfs = ({id, activeBusLookup, layerIds, routeGroupIndex, colorGroupIndex, routeColorGroupIndex}) => {
                 const styleOpacities = me.styleOpacities,
                     promises = [];
 
@@ -2474,6 +2474,9 @@ export default class extends Evented {
                 return Promise.all(promises).then(() => {
                     me.trafficLayer.removeRouteGroup(routeGroupIndex);
                     me.trafficLayer.removeColorGroup(colorGroupIndex);
+                    if (routeColorGroupIndex !== undefined) {
+                        me.trafficLayer.removeColorGroup(routeColorGroupIndex);
+                    }
                 });
             };
 
@@ -2546,6 +2549,17 @@ export default class extends Evented {
                     routeGroupIndex: me.trafficLayer.addRouteGroup(routeData),
                     colorGroupIndex: me.trafficLayer.addColorGroup([{id, color: source.color}])
                 });
+
+                // Register one color group per route so vehicle boxes can
+                // take their own route's color (routes without a GTFS color
+                // fall back to the data source color). The group index is
+                // kept on the feed entry so it is removed with the feed.
+                me.gtfs.get(id).routeColorGroupIndex = me.trafficLayer.addColorGroup(
+                    [...me.gtfs.get(id).routes.getAll()].map(route => ({
+                        id: `${id}.${route.id}`,
+                        color: route.color || source.color
+                    }))
+                );
 
                 // Build the station search index from GTFS stops. The datalist
                 // and stationTitleLookup are otherwise only populated from
@@ -3399,6 +3413,7 @@ export default class extends Evented {
                 trafficLayer.markObject();
                 if (markedObject.type === 'bus') {
                     me.updateBusTripHighlight(markedObject);
+                    me.updateBusRouteHighlight();
                 }
             } else {
                 me.removeStationOutline('stations-marked');
@@ -3416,6 +3431,7 @@ export default class extends Evented {
                 trafficLayer.markObject(object);
                 if (object.type === 'bus') {
                     me.updateBusTripHighlight(object);
+                    me.updateBusRouteHighlight(object.gtfsId, object.trip.route);
                 }
             } else {
                 me.addStationOutline(object, 'stations-marked');

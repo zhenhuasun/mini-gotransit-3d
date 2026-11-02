@@ -707,6 +707,34 @@ function loadGtfs(source, now, lang) {
                 trips: getTrips(results.trips, services, serviceExceptions, results.stop_times, translations)
             };
 
+        // Paint each route shape with its GTFS route_color (routes.txt).
+        // ShapeReader otherwise paints every shape with the data source
+        // color, hiding the per-route colors. A shape shared by several
+        // routes takes the first route that defines a color; shapes no
+        // route references keep the data source color.
+        {
+            const routeColorByShape = new Map();
+
+            for (const route of result.routes) {
+                if (route.color) {
+                    for (const shape of route.shapes) {
+                        if (!routeColorByShape.has(shape)) {
+                            routeColorByShape.set(shape, route.color);
+                        }
+                    }
+                }
+            }
+            for (const feature of featureCollection.features) {
+                if (feature.properties.type === 0) {
+                    const color = routeColorByShape.get(feature.properties.id);
+
+                    if (color) {
+                        feature.properties.color = color;
+                    }
+                }
+            }
+        }
+
         return [geobuf.encode(featureCollection, new PbfWriter()), encode(result, new PbfWriter())];
     });
 }
