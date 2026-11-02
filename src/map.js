@@ -3430,8 +3430,8 @@ export default class extends Evented {
                 me.updateObjectPosition(object);
                 trafficLayer.markObject(object);
                 if (object.type === 'bus') {
-                    // DEBUG (temporary): trace bus hover highlight
-                    console.log('[dbg mark bus]', object.gtfsId, object.trip.route, object.trip.shape);
+                    // DEBUG (temporary): title survives production strip()
+                    document.title = '[dbg mark] ' + object.gtfsId + ' ' + object.trip.route + ' ' + object.trip.shape;
                     me.updateBusTripHighlight(object);
                     me.updateBusRouteHighlight(object.gtfsId, object.trip.route);
                 }
@@ -3848,7 +3848,7 @@ export default class extends Evented {
             }
             // DEBUG (temporary): read the state back to see if it stuck
             if (route.shapes.length > 0) {
-                console.log('[dbg route-hl]', gtfsId, routeId, route.shapes.length, route.color || gtfs.color, JSON.stringify(map.getFeatureState({source: gtfsId, id: route.shapes[0]})));
+                document.title = '[dbg hl] ' + gtfsId + ' ' + routeId + ' n=' + route.shapes.length + ' ' + (route.color || gtfs.color) + ' state=' + JSON.stringify(map.getFeatureState({source: gtfsId, id: route.shapes[0]}));
             }
         } else {
             for (const gtfs of me.gtfs.values()) {
