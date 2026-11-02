@@ -94,7 +94,7 @@
 	"transfer-and-wait": "转车并等待 $1分",
 	"cannot-find-train": "找不到当天到达的火车",
 
-	"description": "<h3>关于Mini Tokyo 3D</h3><p>此数据可视化由<a href=\"https://nagix.github.io\" target=\"_blank\">草薙昭彦</a>提供。此应用程序中公共交通数据的来源是<a href=\"https://www.odpt.org\" target=\"_blank\">公共交通开放数据中心</a>。它们基于公共交通运营商提供的数据。 不能保证数据的准确性和完整性。 请不要就应用程序的内容直接联系公共交通运营商。</p><p>有关更多信息，请参阅<a href=\"https://minitokyo3d.com/docs/master/\" target=\"_blank\">Mini Tokyo 3D用户指南</a>。 源代码可从<a href=\"https://github.com/nagix/mini-tokyo-3d\" target=\"_blank\">GitHub存储库</a>中获得。</p>",
+	"description": "<h3>关于 Mini GO Transit 3D</h3><p>Mini GO Transit 3D 是大多伦多地区 GO Transit 服务的实时 3D 可视化，由<a href=\"https://github.com/zhenhuasun\" target=\"_blank\"> Joshua Sun</a> 创建。交通数据来自<a href=\"https://api.openmetrolinx.com/OpenDataAPI/Help/Index/en\" target=\"_blank\"> Metrolinx 开放数据</a>（GO Transit GTFS 与 GTFS Realtime 数据）。不保证数据的准确性与完整性。请不要就本应用的内容直接联系 Metrolinx 或 GO Transit。</p><p>本应用基于草薙昭彦的 <a href=\"https://github.com/nagix/mini-tokyo-3d\" target=\"_blank\">Mini Tokyo 3D</a>，以 MIT 许可证发布。源代码见 <a href=\"https://github.com/zhenhuasun/mini-gotransit-3d\" target=\"_blank\">GitHub 仓库</a>。</p>",
 	"static-update": "静态数据的最新更新",
 	"dynamic-update": "动态数据的最新更新",
 	"gtfs-feed-version": "GTFS源版本",

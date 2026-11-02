@@ -1100,6 +1100,16 @@ export default class extends Evented {
                         me.trackObject(me.stationGroupLookup.get(station.group));
                         return true;
                     }
+
+                    // GTFS-only mode has no mini-tokyo-3d station groups, so
+                    // fly to the matching GTFS stop instead. (A departure
+                    // board popup for the station is a separate feature.)
+                    const gtfsStation = me.gtfsStationLookup && me.gtfsStationLookup.get(value.toUpperCase());
+
+                    if (gtfsStation && gtfsStation.coord) {
+                        map.flyTo({center: gtfsStation.coord, zoom: 15});
+                        return true;
+                    }
                 }
             });
 
@@ -2536,6 +2546,27 @@ export default class extends Evented {
                     routeGroupIndex: me.trafficLayer.addRouteGroup(routeData),
                     colorGroupIndex: me.trafficLayer.addColorGroup([{id, color: source.color}])
                 });
+
+                // Build the station search index from GTFS stops. The datalist
+                // and stationTitleLookup are otherwise only populated from
+                // mini-tokyo-3d railway data, which is empty in GTFS-only mode
+                // and leaves the search box dead. Stops sharing a name
+                // (platforms and bus loops of one station) collapse to a
+                // single entry; the lookup survives later data reloads.
+                if (!me.gtfsStationLookup) {
+                    me.gtfsStationLookup = new Map();
+                }
+                const datalist = document.getElementById('stations');
+                for (const stop of me.gtfs.get(id).stops.getAll()) {
+                    const key = stop.name.toUpperCase();
+
+                    if (!me.gtfsStationLookup.has(key)) {
+                        me.gtfsStationLookup.set(key, stop);
+                        if (datalist) {
+                            helpers.createElement('option', {value: stop.name}, datalist);
+                        }
+                    }
+                }
 
                 map.addSource(id, {
                     type: 'geojson',

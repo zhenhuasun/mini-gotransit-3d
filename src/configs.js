@@ -161,7 +161,7 @@ const configs = {
 
     // Default time zone (IANA name) used by the clock and as the fallback for GTFS
     // feeds that don't specify a valid agency_timezone
-    defaultTimezone: 'Asia/Tokyo',
+    defaultTimezone: 'America/Toronto',
 
     // Default eco mode
     defaultEcoMode: 'normal',
@@ -203,7 +203,7 @@ const configs = {
     customAttribution: '<a href="https://github.com/nagix/mini-tokyo-3d">© Akihiko Kusanagi</a>',
 
     // Copyright string
-    copyright: '© 2019-2026 Akihiko Kusanagi',
+    copyright: '© 2026 Joshua Sun · Mini GO Transit 3D, based on Mini Tokyo 3D by Akihiko Kusanagi (MIT License)',
 
     // Share URL
     shareUrl: 'https://minitokyo3d.com',
