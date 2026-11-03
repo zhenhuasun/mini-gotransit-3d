@@ -182,16 +182,19 @@ class RouteReader {
             me.routeLongNameIndex = fields.indexOf('route_long_name');
             me.routeColorIndex = fields.indexOf('route_color');
             me.routeTextColorIndex = fields.indexOf('route_text_color');
+            me.routeTypeIndex = fields.indexOf('route_type');
         } else {
             const color = fields[me.routeColorIndex],
-                textColor = fields[me.routeTextColorIndex];
+                textColor = fields[me.routeTextColorIndex],
+                routeType = fields[me.routeTypeIndex];
 
             me.array.push({
                 id: fields[me.routeIdIndex],
                 shortName: fields[me.routeShortNameIndex],
                 longName: fields[me.routeLongNameIndex],
                 color: color ? `#${color}` : undefined,
-                textColor: textColor ? `#${textColor}` : undefined
+                textColor: textColor ? `#${textColor}` : undefined,
+                type: routeType ? parseInt(routeType, 10) : undefined
             });
         }
     }

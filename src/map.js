@@ -1409,7 +1409,7 @@ export default class extends Evented {
             callback: () => {
                 const clock = me.clock,
                     now = clock.getTime(),
-                    {minDelay, refreshInterval, realtimeCheckInterval, tripUpdateCheckInterval} = configs;
+                    {minDelay, refreshInterval, realtimeCheckInterval, tripUpdateCheckInterval, serviceAtGlanceCheckInterval} = configs;
 
                 if (now - me.lastTimetableRefresh >= 86400000) {
                     me.refreshTrainTimetableData();
@@ -1507,6 +1507,13 @@ export default class extends Evented {
                         me.refreshTripUpdateData();
                     }
                     me.lastTripUpdateCheck = now - minDelay;
+                }
+
+                if (Math.floor((now - minDelay) / serviceAtGlanceCheckInterval) !== Math.floor(me.lastServiceAtGlanceCheck / serviceAtGlanceCheckInterval)) {
+                    if (me.searchMode === 'none' && me.clockMode === 'realtime' && !me.removing) {
+                        me.refreshServiceAtGlanceData();
+                    }
+                    me.lastServiceAtGlanceCheck = now - minDelay;
                 }
 
                 if ((me.ecoMode === 'normal' && map._loaded) || Date.now() - me.lastRepaint >= 1000 / me.ecoFrameRate) {
@@ -2307,32 +2314,144 @@ export default class extends Evented {
 
     getBusDescription(bus) {
         const me = this,
-            dict = me.dict,
             gtfs = me.gtfs.get(bus.gtfsId),
             stops = gtfs.stops,
-            {route, headsigns, stops: stopIds} = bus.trip,
-            {shortName, longName, color, textColor} = gtfs.routes.get(route),
+            trip = bus.trip,
+            {route, stops: stopIds, departureTimes, stopSequences} = trip,
+            {shortName, longName, color, textColor, type: routeType} = gtfs.routes.get(route),
+            isTrain = routeType === 2,
             labelStyle = [
                 textColor ? `color: ${textColor};` : '',
                 color ? `background-color: ${color};` : ''
             ].join(' '),
             nextStopIndex = bus.sectionIndex + (bus.standing ? 0 : bus.sectionLength),
-            nextStopName = stops.get(stopIds[nextStopIndex]).name,
+            nextStopId = stopIds[nextStopIndex],
+            nextStopName = stops.get(nextStopId).name,
             prevStopIndex = Math.max(0, nextStopIndex - 1),
-            prevStopName = stops.get(stopIds[prevStopIndex]).name;
+            prevStopName = stops.get(stopIds[prevStopIndex]).name,
+            originName = stops.get(stopIds[0]).name,
+            originTime = helpers.getTimeString(departureTimes[0]),
+            sag = me.sagByFleet && bus.id !== undefined && me.sagByFleet.get(String(bus.id)),
+            hasTripUpdates = !!(gtfs.tripDelayTable && gtfs.tripDelayTable.has(trip.id));
+
+        // At-stop row: prefer the live feed status (STOPPED_AT + stop
+        // sequence), fall back to the animation dwell state.
+        let atStopId, atStopName;
+        if ((bus.status === 1 || bus.status === 'STOPPED_AT') && bus.stop !== undefined) {
+            const index = stopSequences.indexOf(bus.stop);
+            if (index !== -1) {
+                atStopId = stopIds[index];
+                atStopName = stops.get(atStopId).name;
+            }
+        }
+        if (atStopId === undefined && bus.standing) {
+            atStopId = stopIds[bus.sectionIndex];
+            atStopName = stops.get(atStopId).name;
+        }
+
+        // Status + delay: without a TripUpdates entry the row is
+        // Unavailable (in practice this only happens for timetable
+        // buses, since live vehicles almost always have an entry).
+        let statusText = 'Unavailable',
+            statusColor = '#666',
+            delayText = '-',
+            delayColor = '';
+        if (hasTripUpdates) {
+            if (bus.status === 2 || bus.status === 'IN_TRANSIT_TO') {
+                statusText = 'In Motion';
+                statusColor = '#00a651';
+            } else if (bus.status === 0 || bus.status === 'INCOMING_AT') {
+                statusText = 'Arriving';
+                statusColor = '#d97706';
+            } else if (bus.status === 1 || bus.status === 'STOPPED_AT') {
+                statusText = 'Stopped';
+                statusColor = '#666';
+            }
+            if (bus.delay !== undefined) {
+                if (bus.delay < 0) {
+                    delayText = `Early: ${Math.floor(-bus.delay / 60)}m`;
+                    delayColor = '#1976d2';
+                } else if (bus.delay < 180) {
+                    delayText = 'On Time';
+                    delayColor = '#00a651';
+                } else if (bus.delay < 900) {
+                    delayText = `Delay: +${Math.floor(bus.delay / 60)}m`;
+                    delayColor = '#b58900';
+                } else {
+                    delayText = `Delay: +${Math.floor(bus.delay / 60)}m`;
+                    delayColor = '#c62828';
+                }
+            }
+        }
+
+        // Next-stop predicted time + delay: the stop's own TripUpdates
+        // entry when present, else scheduled time shifted by the
+        // vehicle's current delay.
+        const stopDelay = me.getStopDelay(gtfs, trip.id, nextStopId);
+        let nextTimeText, nextDelayParen = '';
+        if (stopDelay) {
+            nextTimeText = me.formatTorontoTime(stopDelay.time / 1000);
+            if (stopDelay.delay > 0) {
+                nextDelayParen = ` (+${Math.floor(stopDelay.delay / 60)}m)`;
+            } else if (stopDelay.delay < 0) {
+                nextDelayParen = ` (-${Math.floor(-stopDelay.delay / 60)}m)`;
+            }
+        } else {
+            const delay = hasTripUpdates && bus.delay !== undefined ? bus.delay : 0;
+            nextTimeText = helpers.getTimeString(departureTimes[nextStopIndex] + delay * 1000);
+            if (delay > 0) {
+                nextDelayParen = ` (+${Math.floor(delay / 60)}m)`;
+            } else if (delay < 0) {
+                nextDelayParen = ` (-${Math.floor(-delay / 60)}m)`;
+            }
+        }
+
+        // Platform: cached value when fresh, else a dash; trains with
+        // a known API trip number trigger an async fill (see
+        // fetchStopPlatform). Buses have no platforms, so they keep
+        // the dash and never fetch.
+        const platformFor = stopId => {
+            const entry = me.platformCache && me.platformCache.get(`${trip.id}.${stopId}`);
+            return entry && Date.now() - entry.time < 60000 && entry.value ? entry.value : '-';
+        };
+        if (isTrain && sag && sag.trip) {
+            if (atStopId) {
+                me.fetchStopPlatform(bus, atStopId, sag.trip);
+            }
+            me.fetchStopPlatform(bus, nextStopId, sag.trip);
+        }
+
+        const badge = shortName || longName ? `<span class="bus-route-label" style="${labelStyle}">${shortName || longName}</span>` : '',
+            title = shortName && longName ? `${badge} <strong>${longName}</strong>` : `<strong>${badge || longName || ''}</strong>`;
 
         return [
             '<div class="desc-header">',
-            `<div style="background-color: ${gtfs.color};"></div>`,
-            `<div><strong>${gtfs.agency}</strong>`,
+            `<div style="background-color: ${color || gtfs.color};"></div>`,
+            `<div>${title}`,
             bus.stop !== undefined ? '<span class="realtime-small-icon"></span>' : '',
-            '<br>',
-            shortName || longName ? ` <span class="bus-route-label" style="${labelStyle}">${shortName || longName}</span> ` : '',
-            headsigns.length === 0 ? longName : headsigns[headsigns.length === 1 ? 0 : prevStopIndex],
             '</div></div>',
-            bus.id ? `<strong>${dict['vehicle-number']}:</strong> ${bus.id}<br>` : '',
-            `<strong>${dict['previous-busstop']}:</strong> ${prevStopName}<br>`,
-            `<strong>${dict['next-busstop']}:</strong> ${nextStopName}`
+            `<strong>Origin stop:</strong> ${originName} ${originTime}<br>`,
+            bus.id ? [
+                '<div class="desc-row"><span><strong>Vehicle number:</strong> ',
+                bus.id,
+                '</span>',
+                isTrain ? `<span><strong>Car:</strong> ${sag && sag.cars ? sag.cars : '-'}</span>` : '',
+                '</div>'
+            ].join('') : '',
+            '<div class="desc-row"><span><strong>Status:</strong> ',
+            `<span style="color: ${statusColor};">${statusText}</span></span><span style="color: ${delayColor};">${delayText}</span></div>`,
+            atStopId ? [
+                '<div class="desc-row"><span><strong>At stop:</strong> ',
+                atStopName,
+                '</span><span><strong>Platform:</strong> ',
+                platformFor(atStopId),
+                '</span></div>'
+            ].join('') : `<strong>Previous stop:</strong> ${prevStopName}<br>`,
+            '<div class="desc-row"><span><strong>Next stop:</strong> ',
+            `${nextStopName} ${nextTimeText}${nextDelayParen}`,
+            '</span><span><strong>Platform:</strong> ',
+            platformFor(nextStopId),
+            '</span></div>'
         ].join('');
     }
 
@@ -3267,6 +3386,7 @@ export default class extends Evented {
                             offset: 0
                         });
                     }
+                    bus.status = vp.currentStatus;
                     if (stop) {
                         bus.stop = stop;
                     } else {
@@ -3316,6 +3436,23 @@ export default class extends Evented {
         return {delay, level: delay >= 900 ? 2 : delay >= 180 ? 1 : 0};
     }
 
+    // TripUpdates entry for one stop of a trip, or null when the trip
+    // or the stop has no entry. Used for the next-stop predicted time
+    // and delay in the vehicle popup.
+    getStopDelay(gtfs, tripId, stopId) {
+        const stops = gtfs.tripDelayTable && gtfs.tripDelayTable.get(tripId);
+        if (!stops) {
+            return null;
+        }
+        return stops.find(stop => stop.stopId === stopId) || null;
+    }
+
+    // Unix seconds formatted as Toronto HH:MM (TripUpdates times are
+    // absolute clock times, unlike the static ms-since-3am domain).
+    formatTorontoTime(unixSeconds) {
+        return new Date(unixSeconds * 1000).toLocaleTimeString('en-CA', {timeZone: 'America/Toronto', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'});
+    }
+
     // TripUpdates delay data for GO vehicles, refreshed every 30s in
     // realtime mode only (playback runs timetable buses with no
     // realtime data, so no spheres appear there). Each active bus gets
@@ -3350,7 +3487,7 @@ export default class extends Evented {
                         if (s.scheduleRelationship === 1 || s.scheduleRelationship === 'SKIPPED') {
                             continue;
                         }
-                        stops.push({time: departure.time * 1000, delay: departure.delay});
+                        stops.push({stopId: s.stopId, time: departure.time * 1000, delay: departure.delay});
                     }
                     if (stops.length) {
                         stops.sort((a, b) => a.time - b.time);
@@ -3380,6 +3517,85 @@ export default class extends Evented {
                 console.log(error);
             });
         }
+    }
+
+    // Service at a Glance vehicle data (car counts + API trip numbers
+    // for trains), refreshed every 60s in realtime mode. Keyed by fleet
+    // number, which matches the vehicle number shown in the popup.
+    refreshServiceAtGlanceData() {
+        const me = this;
+
+        let origin;
+        for (const gtfs of me.gtfs.values()) {
+            if (gtfs.vehiclePositionUrl) {
+                try {
+                    origin = new URL(gtfs.vehiclePositionUrl).origin;
+                } catch (error) {
+                    // ignore a malformed URL and try the next source
+                }
+                if (origin) {
+                    break;
+                }
+            }
+        }
+        origin = origin || 'https://go-3d-tracker-proxy.zhenhuasun.workers.dev';
+
+        fetch(`${origin}/api/vehicles`).then(res => res.json()).then(data => {
+            const byFleet = new Map();
+            for (const vehicle of data.vehicles || []) {
+                if (vehicle.fleet) {
+                    byFleet.set(String(vehicle.fleet), {cars: vehicle.cars, trip: vehicle.trip});
+                }
+            }
+            me.sagByFleet = byFleet;
+        }).catch(error => {
+            console.log(error);
+        });
+    }
+
+    // Platform of one stop for one vehicle, from NextService departures
+    // matched by the Service at a Glance trip number. The popup is
+    // synchronous, so the platform fills in asynchronously: the value
+    // is cached (60s) and the popup rebuilds only if this vehicle is
+    // still hovered. Until the Worker serves the platform field, or the
+    // API leaves it empty, the popup shows a dash.
+    fetchStopPlatform(bus, stopId, sagTrip) {
+        const me = this,
+            key = `${bus.trip.id}.${stopId}`,
+            cached = me.platformCache && me.platformCache.get(key);
+
+        if (cached && Date.now() - cached.time < 60000) {
+            return;
+        }
+        me.platformCache = me.platformCache || new Map();
+        me.platformFetching = me.platformFetching || new Set();
+        if (me.platformFetching.has(key)) {
+            return;
+        }
+        me.platformFetching.add(key);
+
+        const gtfs = me.gtfs.get(bus.gtfsId);
+        let origin;
+        if (gtfs && gtfs.vehiclePositionUrl) {
+            try {
+                origin = new URL(gtfs.vehiclePositionUrl).origin;
+            } catch (error) {
+                // fall through to the default origin
+            }
+        }
+        origin = origin || 'https://go-3d-tracker-proxy.zhenhuasun.workers.dev';
+
+        fetch(`${origin}/api/departures?stop=${encodeURIComponent(stopId)}`).then(res => res.json()).then(data => {
+            const row = (data.departures || []).find(departure => departure.trip === sagTrip);
+            me.platformCache.set(key, {value: (row && row.platform) || '', time: Date.now()});
+            me.platformFetching.delete(key);
+            if (me.markedObject === bus) {
+                me.updatePopup({setHTML: true});
+            }
+        }).catch(error => {
+            me.platformFetching.delete(key);
+            console.log(error);
+        });
     }
 
     updateUndergroundButton(mode) {

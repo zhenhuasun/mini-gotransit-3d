@@ -42,6 +42,14 @@ export default class {
             me.textColor = textColor;
         }
 
+        if (params.type !== undefined) {
+            /**
+             * GTFS route type (2 = rail, 3 = bus).
+             * @type {number}
+             */
+            me.type = params.type;
+        }
+
         /**
          * Route shape IDs.
          * @type {Array<string>}

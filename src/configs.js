@@ -58,6 +58,9 @@ const configs = {
     // Interval of checking TripUpdates delay data in milliseconds
     tripUpdateCheckInterval: 30000,
 
+    // Interval of checking Service at a Glance vehicle data (car counts) in milliseconds
+    serviceAtGlanceCheckInterval: 60000,
+
     // Maximum train speed in km/h
     maxSpeedKMPH: 80,
 
