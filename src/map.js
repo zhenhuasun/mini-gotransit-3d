@@ -2331,6 +2331,8 @@ export default class extends Evented {
             prevStopName = stops.get(stopIds[prevStopIndex]).name,
             originName = stops.get(stopIds[0]).name,
             originTime = helpers.getTimeString(departureTimes[0]),
+            destName = stops.get(stopIds[stopIds.length - 1]).name,
+            destTime = helpers.getTimeString(departureTimes[departureTimes.length - 1]),
             sag = me.sagByFleet && bus.id !== undefined && me.sagByFleet.get(String(bus.id)),
             hasTripUpdates = !!(gtfs.tripDelayTable && gtfs.tripDelayTable.has(trip.id));
 
@@ -2393,7 +2395,7 @@ export default class extends Evented {
             `<div>${title}`,
             bus.stop !== undefined ? '<span class="realtime-small-icon"></span>' : '',
             '</div></div>',
-            `<strong>Origin stop:</strong> ${originName} ${originTime}<br>`,
+            `${originName} ${originTime} - ${destName} ${destTime}<br>`,
             bus.id ? [
                 '<div class="desc-row"><span><strong>Vehicle number:</strong> ',
                 bus.id,
