@@ -1014,6 +1014,8 @@
     color: #fff;
     background-color: rgba(0, 0, 0, 0.7);
     pointer-events: none;
+    width: max-content;
+    white-space: nowrap;
 }
 .mini-tokyo-3d .popup-touch .mapboxgl-popup-content {
     pointer-events: auto;

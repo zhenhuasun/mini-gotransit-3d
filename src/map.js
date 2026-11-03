@@ -2384,41 +2384,16 @@ export default class extends Evented {
             }
         }
 
-        // Next-stop predicted time + delay: the stop's own TripUpdates
-        // entry when present, else scheduled time shifted by the
-        // vehicle's current delay.
-        const stopDelay = me.getStopDelay(gtfs, trip.id, nextStopId);
-        let nextTimeText, nextDelayParen = '';
-        if (stopDelay) {
-            nextTimeText = me.formatTorontoTime(stopDelay.time / 1000);
-            if (stopDelay.delay > 0) {
-                nextDelayParen = ` (+${Math.floor(stopDelay.delay / 60)}m)`;
-            } else if (stopDelay.delay < 0) {
-                nextDelayParen = ` (-${Math.floor(-stopDelay.delay / 60)}m)`;
-            }
-        } else {
-            const delay = hasTripUpdates && bus.delay !== undefined ? bus.delay : 0;
-            nextTimeText = helpers.getTimeString(departureTimes[nextStopIndex] + delay * 1000);
-            if (delay > 0) {
-                nextDelayParen = ` (+${Math.floor(delay / 60)}m)`;
-            } else if (delay < 0) {
-                nextDelayParen = ` (-${Math.floor(-delay / 60)}m)`;
-            }
-        }
-
         // Platform: cached value when fresh, else a dash; trains with
-        // a known API trip number trigger an async fill (see
-        // fetchStopPlatform). Buses have no platforms, so they keep
-        // the dash and never fetch.
+        // a known API trip number trigger an async fill for the
+        // at-stop platform (see fetchStopPlatform). Buses have no
+        // platforms, so they keep the dash and never fetch.
         const platformFor = stopId => {
             const entry = me.platformCache && me.platformCache.get(`${trip.id}.${stopId}`);
             return entry && Date.now() - entry.time < 60000 && entry.value ? entry.value : '-';
         };
-        if (isTrain && sag && sag.trip) {
-            if (atStopId) {
-                me.fetchStopPlatform(bus, atStopId, sag.trip);
-            }
-            me.fetchStopPlatform(bus, nextStopId, sag.trip);
+        if (isTrain && sag && sag.trip && atStopId) {
+            me.fetchStopPlatform(bus, atStopId, sag.trip);
         }
 
         const badge = shortName || longName ? `<span class="bus-route-label" style="${labelStyle}">${shortName || longName}</span>` : '',
@@ -2447,11 +2422,7 @@ export default class extends Evented {
                 platformFor(atStopId),
                 '</span></div>'
             ].join('') : `<strong>Previous stop:</strong> ${prevStopName}<br>`,
-            '<div class="desc-row"><span><strong>Next stop:</strong> ',
-            `${nextStopName} ${nextTimeText}${nextDelayParen}`,
-            '</span><span><strong>Platform:</strong> ',
-            platformFor(nextStopId),
-            '</span></div>'
+            `<strong>Next stop:</strong> ${nextStopName}`
         ].join('');
     }
 
@@ -3436,23 +3407,6 @@ export default class extends Evented {
         return {delay, level: delay >= 900 ? 2 : delay >= 180 ? 1 : 0};
     }
 
-    // TripUpdates entry for one stop of a trip, or null when the trip
-    // or the stop has no entry. Used for the next-stop predicted time
-    // and delay in the vehicle popup.
-    getStopDelay(gtfs, tripId, stopId) {
-        const stops = gtfs.tripDelayTable && gtfs.tripDelayTable.get(tripId);
-        if (!stops) {
-            return null;
-        }
-        return stops.find(stop => stop.stopId === stopId) || null;
-    }
-
-    // Unix seconds formatted as Toronto HH:MM (TripUpdates times are
-    // absolute clock times, unlike the static ms-since-3am domain).
-    formatTorontoTime(unixSeconds) {
-        return new Date(unixSeconds * 1000).toLocaleTimeString('en-CA', {timeZone: 'America/Toronto', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'});
-    }
-
     // TripUpdates delay data for GO vehicles, refreshed every 30s in
     // realtime mode only (playback runs timetable buses with no
     // realtime data, so no spheres appear there). Each active bus gets
@@ -3850,7 +3804,7 @@ export default class extends Evented {
                 className: helpers.isTouchDevice() ? 'popup-object popup-touch' : 'popup-object',
                 closeButton: false,
                 closeOnClick: false,
-                maxWidth: '300px',
+                maxWidth: '90vw',
                 offset: {
                     top: [0, 10],
                     bottom: [0, -30]
