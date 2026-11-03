@@ -87,8 +87,12 @@ export default class extends Panel {
 
         const origin = workerOrigin(gtfs),
             isUnion = stopName.indexOf('Union Station') === 0,
-            stopCode = /^[A-Z]{2,4}$/.test(stopId) ? stopId : null;
+            // Every GTFS stop_id goes to the Worker now: it resolves
+            // letter ids directly and numeric bus-stop ids via the
+            // Stop/All mapping (GTFS stop_code fallback).
+            stopCode = stopId;
         let nextRows = null,
+            nextMapped = true,
             platformByTrip = new Map(),
             unionRows = null,
             apiFailed = false;
@@ -100,6 +104,11 @@ export default class extends Panel {
                 if (res.ok) {
                     const data = await res.json();
                     nextRows = Array.isArray(data.departures) ? data.departures : [];
+                    nextMapped = data.mapped !== undefined ? data.mapped : true;
+                } else if (res.status === 400) {
+                    // Old Worker still rejects numeric ids: treat as
+                    // unmapped, not as an API failure.
+                    nextMapped = false;
                 } else {
                     apiFailed = true;
                 }
@@ -190,7 +199,9 @@ export default class extends Panel {
             // an API failure, and a stop without an API code never
             // attempted a live fetch at all.
             rows = me.computeStaticRows(gtfs, stopId);
-            if (nextRows && !nextRows.length) {
+            if (nextRows && !nextRows.length && !nextMapped) {
+                sourceNote = 'Timetable (live data not available for this stop)';
+            } else if (nextRows && !nextRows.length) {
                 sourceNote = 'No live departures right now · Timetable';
             } else if (apiFailed) {
                 sourceNote = 'Timetable (API unavailable)';
