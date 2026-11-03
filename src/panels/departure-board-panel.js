@@ -163,7 +163,12 @@ export default class extends Panel {
             if (modeRows.length) {
                 rows = modeRows.map(d => ({
                     line: d.service || d.line || '',
-                    destination: d.info || d.dest || '',
+                    // Info is a boarding instruction ('Proceed / Avancez'),
+                    // not the destination — the destination is the last
+                    // stop served, in travel order.
+                    destination: d.stops && d.stops.length ?
+                        d.stops[d.stops.length - 1].name :
+                        (d.info || d.dest || ''),
                     scheduled: '',
                     expected: d.time || '',
                     status: '',
