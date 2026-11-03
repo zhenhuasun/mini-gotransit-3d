@@ -2400,7 +2400,7 @@ export default class extends Evented {
                 '<div class="desc-row"><span><strong>Vehicle number:</strong> ',
                 bus.id,
                 '</span>',
-                isTrain ? `<span><strong>Car:</strong> ${sag && sag.cars ? sag.cars : '-'}</span>` : '',
+                isTrain && sag && sag.cars ? `<span><strong>Car:</strong> ${sag.cars}</span>` : '',
                 '</div>'
             ].join('') : '',
             '<div class="desc-row"><span><strong>Status:</strong> ',

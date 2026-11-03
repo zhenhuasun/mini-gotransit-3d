@@ -14,6 +14,7 @@ export function encode(data, pbf) {
             if (obj.longName) pbf.writeStringField(3, obj.longName);
             if (obj.color) pbf.writeStringField(4, obj.color);
             if (obj.textColor) pbf.writeStringField(5, obj.textColor);
+            if (obj.type !== undefined) pbf.writeVarintField(7, obj.type);
             for (const shape of obj.shapes) {
                 pbf.writeStringField(6, shape);
             }
@@ -54,6 +55,7 @@ export function decode(pbf) {
             else if (tag === 4) obj.color = pbf.readString();
             else if (tag === 5) obj.textColor = pbf.readString();
             else if (tag === 6) obj.shapes.push(pbf.readString());
+            else if (tag === 7) obj.type = pbf.readVarint();
         }, {shapes: []}, pbf.readVarint() + pbf.pos));
         if (tag === 4) obj.trips.push(pbf.readFields((tag, obj, pbf) => {
             if (tag === 1) obj.id = pbf.readString();

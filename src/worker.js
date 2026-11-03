@@ -521,7 +521,7 @@ function getRoutes(routes, trips, translations) {
         }
     }
 
-    return routes.map(({id, shortName, longName, color, textColor}) => ({
+    return routes.map(({id, shortName, longName, color, textColor, type}) => ({
         id,
         shortName: translations ?
             translations.get(`routes.route_short_name.${id}`) || translations.get(`routes.route_short_name.${shortName}`) || shortName :
@@ -531,6 +531,7 @@ function getRoutes(routes, trips, translations) {
             longName,
         color,
         textColor,
+        type,
         shapes: Array.from((shapes.get(id) || new Set()).values())
     }));
 }
