@@ -61,9 +61,6 @@ const configs = {
     // Interval of checking Service at a Glance vehicle data (car counts) in milliseconds
     serviceAtGlanceCheckInterval: 60000,
 
-    // Interval of checking live camera streams in milliseconds
-    camCheckInterval: 60000,
-
     // Maximum train speed in km/h
     maxSpeedKMPH: 80,
 

@@ -521,7 +521,7 @@ function getRoutes(routes, trips, translations) {
         }
     }
 
-    return routes.map(({id, shortName, longName, color, textColor, type}) => ({
+    return routes.map(({id, shortName, longName, color, textColor}) => ({
         id,
         shortName: translations ?
             translations.get(`routes.route_short_name.${id}`) || translations.get(`routes.route_short_name.${shortName}`) || shortName :
@@ -531,7 +531,6 @@ function getRoutes(routes, trips, translations) {
             longName,
         color,
         textColor,
-        type,
         shapes: Array.from((shapes.get(id) || new Set()).values())
     }));
 }
@@ -716,36 +715,27 @@ function loadGtfs(source, now, lang) {
 
         // Paint each route shape with its GTFS route_color (routes.txt).
         // ShapeReader otherwise paints every shape with the data source
-        // color, hiding the per-route colors. Also tag each shape with
-        // its route id, for per-route layer filtering (see
-        // applyGoRouteFilter in map.js). A shape shared by several
-        // routes takes the first route that defines a color (and the
-        // first route, for the tag); shapes no route references keep
-        // the data source color.
+        // color, hiding the per-route colors. A shape shared by several
+        // routes takes the first route that defines a color; shapes no
+        // route references keep the data source color.
         {
-            const routeColorByShape = new Map(),
-                routeByShape = new Map();
+            const routeColorByShape = new Map();
 
             for (const route of result.routes) {
-                for (const shape of route.shapes) {
-                    if (!routeByShape.has(shape)) {
-                        routeByShape.set(shape, route.id);
-                    }
-                    if (route.color && !routeColorByShape.has(shape)) {
-                        routeColorByShape.set(shape, route.color);
+                if (route.color) {
+                    for (const shape of route.shapes) {
+                        if (!routeColorByShape.has(shape)) {
+                            routeColorByShape.set(shape, route.color);
+                        }
                     }
                 }
             }
             for (const feature of featureCollection.features) {
                 if (feature.properties.type === 0) {
-                    const color = routeColorByShape.get(feature.properties.id),
-                        route = routeByShape.get(feature.properties.id);
+                    const color = routeColorByShape.get(feature.properties.id);
 
                     if (color) {
                         feature.properties.color = color;
-                    }
-                    if (route) {
-                        feature.properties.route = route;
                     }
                 }
             }

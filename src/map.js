@@ -16,7 +16,7 @@ import * as helpersMapbox from './helpers/helpers-mapbox';
 import * as helpersWebgl from './helpers/helpers-webgl';
 import {GeoJsonLayer, GlowCompositeLayer, RailwayStatusGlowLayer, STROKE_WIDTH_SCALE_STOPS, StationGlowLayer, ThreeLayer, Tile3DLayer, TrafficLayer, ZoomWidthScaleExtension} from './layers';
 import {isExpired, loadBusData, loadDictionary, loadDynamicBusData, loadDynamicFlightData, loadDynamicTrainData, loadStaticData, loadTimetableData, updateOdptUrl} from './loader';
-import {AboutPanel, BusPanel, DepartureBoardPanel, GoLayerPanel, LayerPanel, SharePanel, StationPanel, TrackingModePanel, TrainPanel} from './panels';
+import {AboutPanel, BusPanel, DepartureBoardPanel, LayerPanel, SharePanel, StationPanel, TrackingModePanel, TrainPanel} from './panels';
 import Plugin from './plugin';
 import nearestCloserPointOnLine from './turf/nearest-closer-point-on-line';
 
@@ -25,22 +25,6 @@ const RAILWAY_NAMBOKU = 'TokyoMetro.Namboku',
     RAILWAY_ARAKAWA = 'Toei.Arakawa';
 
 const AIRLINES_FOR_ANA_CODE_SHARE = ['ADO', 'SFJ', 'SNJ'];
-
-// Live camera streams shown by the GO layers panel. Coordinates are
-// the verified geocodes of the addresses the streams watch.
-const LIVE_CAMS = [{
-    id: 'lakeshore',
-    videoId: 'bbjwotvAvDM',
-    title: 'Lake Shore Blvd W Live Camera',
-    lng: -79.46602,
-    lat: 43.6364
-}, {
-    id: 'harbour',
-    videoId: 'CNXmD1h2Iq8',
-    title: 'Harbour St Live Camera',
-    lng: -79.37715,
-    lat: 43.64285
-}];
 
 const DEGREE_TO_RADIAN = Math.PI / 180;
 
@@ -1186,7 +1170,6 @@ export default class extends Evented {
         }
 
         me.layerPanel = new LayerPanel({layers: me.plugins});
-        me.goLayerPanel = new GoLayerPanel();
         me.trackingModePanel = new TrackingModePanel();
         me.aboutPanel = new AboutPanel();
 
@@ -1208,19 +1191,6 @@ export default class extends Evented {
                 title: dict['about'],
                 eventHandler() {
                     me.aboutPanel.addTo(me);
-                }
-            }]));
-        }
-
-        // GO layers button: always shown (the Tokyo layers button is
-        // gated on configControl, which the GO config does not set).
-        // Guarded so enabling configControl later never yields two.
-        if (!me.configControl) {
-            map.addControl(new MapboxGLButtonControl([{
-                className: 'mapboxgl-ctrl-layers',
-                title: dict['select-layers'] || 'Layers',
-                eventHandler() {
-                    me.goLayerPanel.addTo(me);
                 }
             }]));
         }
@@ -1439,7 +1409,7 @@ export default class extends Evented {
             callback: () => {
                 const clock = me.clock,
                     now = clock.getTime(),
-                    {minDelay, refreshInterval, realtimeCheckInterval, tripUpdateCheckInterval, serviceAtGlanceCheckInterval, camCheckInterval} = configs;
+                    {minDelay, refreshInterval, realtimeCheckInterval, tripUpdateCheckInterval, serviceAtGlanceCheckInterval} = configs;
 
                 if (now - me.lastTimetableRefresh >= 86400000) {
                     me.refreshTrainTimetableData();
@@ -1544,15 +1514,6 @@ export default class extends Evented {
                         me.refreshServiceAtGlanceData();
                     }
                     me.lastServiceAtGlanceCheck = now - minDelay;
-                }
-
-                // Live cameras are real-world, not timetable data, so
-                // they are checked in every clock mode.
-                if (Math.floor((now - minDelay) / camCheckInterval) !== Math.floor(me.lastCamCheck / camCheckInterval)) {
-                    if (!me.removing) {
-                        me.refreshLiveCams();
-                    }
-                    me.lastCamCheck = now - minDelay;
                 }
 
                 if ((me.ecoMode === 'normal' && map._loaded) || Date.now() - me.lastRepaint >= 1000 / me.ecoFrameRate) {
@@ -1955,11 +1916,7 @@ export default class extends Evented {
             return;
         }
         me.gtfs.get(bus.gtfsId).activeBusLookup.set(bus.trip.id, bus);
-        // A bus on a hidden route gets no 3D instance; its animation
-        // chain still runs via busRepeat (updateObject skips it).
-        if (!me.isGoRouteHidden(bus.gtfsId, bus.trip.route)) {
-            me.trafficLayer.addObject(bus);
-        }
+        me.trafficLayer.addObject(bus);
         me.busRepeat(bus);
     }
 
@@ -3556,337 +3513,6 @@ export default class extends Evented {
             me.sagByFleet = byFleet;
         }).catch(error => {
             console.log(error);
-        });
-    }
-
-    // ---- GO layers: route toggles + live cameras ----
-
-    isGoRouteHidden(gtfsId, routeId) {
-        const me = this,
-            hidden = me.hiddenGoRoutes && me.hiddenGoRoutes.get(gtfsId);
-
-        return !!(hidden && hidden.has(routeId));
-    }
-
-    applyGoRouteFilter(gtfsId) {
-        const me = this,
-            map = me.map,
-            hidden = [...(me.hiddenGoRoutes && me.hiddenGoRoutes.get(gtfsId) || [])],
-            filter = ['all', ['==', ['get', 'type'], 0], ['!in', ['get', 'route'], ['literal', hidden]]];
-
-        for (const key of ['busroute', 'busroute-highlighted']) {
-            const layerId = `${key}-${gtfsId}-og-`;
-
-            if (map.getLayer(layerId)) {
-                map.setFilter(layerId, filter);
-            }
-        }
-    }
-
-    setGoRouteVisible(gtfsId, routeId, visible) {
-        const me = this;
-
-        if (!me.hiddenGoRoutes) {
-            me.hiddenGoRoutes = new Map();
-        }
-        let hidden = me.hiddenGoRoutes.get(gtfsId);
-
-        if (!hidden) {
-            hidden = new Set();
-            me.hiddenGoRoutes.set(gtfsId, hidden);
-        }
-        if (visible) {
-            hidden.delete(routeId);
-        } else {
-            hidden.add(routeId);
-        }
-        me.applyGoRouteFilter(gtfsId);
-
-        // Vehicles: drop the 3D instance when hiding, re-create it
-        // when showing (the animation chain keeps running either way,
-        // and updateObject skips buses without an instance).
-        const gtfs = me.gtfs.get(gtfsId);
-
-        if (gtfs) {
-            for (const bus of gtfs.activeBusLookup.values()) {
-                if (bus.trip.route === routeId) {
-                    if (visible) {
-                        if (bus.instanceID === undefined && bus.offsets) {
-                            me.trafficLayer.addObject(bus);
-                        }
-                    } else if (bus.instanceID !== undefined) {
-                        me.trafficLayer.removeObject(bus);
-                    }
-                }
-            }
-        }
-    }
-
-    toggleGoRoute(gtfsId, routeId) {
-        this.setGoRouteVisible(gtfsId, routeId, this.isGoRouteHidden(gtfsId, routeId));
-    }
-
-    setGoGroupVisible(gtfsId, routeType, visible) {
-        const me = this,
-            gtfs = me.gtfs.get(gtfsId);
-
-        if (!gtfs) {
-            return;
-        }
-        for (const route of gtfs.routes.getAll()) {
-            if (route.type === routeType) {
-                me.setGoRouteVisible(gtfsId, route.id, visible);
-            }
-        }
-    }
-
-    isGoGroupAllVisible(gtfsId, routeType) {
-        const me = this,
-            gtfs = me.gtfs.get(gtfsId);
-
-        if (!gtfs) {
-            return true;
-        }
-        for (const route of gtfs.routes.getAll()) {
-            if (route.type === routeType && me.isGoRouteHidden(gtfsId, route.id)) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    isGoCamsEnabled() {
-        return this.goCamsEnabled !== false;
-    }
-
-    toggleGoCams() {
-        const me = this;
-
-        me.goCamsEnabled = !me.isGoCamsEnabled();
-        me.applyGoCamVisibility();
-    }
-
-    applyGoCamVisibility() {
-        const me = this,
-            map = me.map;
-
-        if (map.getLayer('go-live-cams')) {
-            map.setLayoutProperty('go-live-cams', 'visibility', me.isGoCamsEnabled() ? 'visible' : 'none');
-        }
-    }
-
-    createLiveCamIcon() {
-        const canvas = document.createElement('canvas'),
-            ctx = canvas.getContext('2d');
-
-        canvas.width = canvas.height = 64;
-        // White disc with a blue ring, like the reference camera marker.
-        ctx.beginPath();
-        ctx.arc(32, 32, 30, 0, Math.PI * 2);
-        ctx.fillStyle = '#ffffff';
-        ctx.fill();
-        ctx.lineWidth = 4;
-        ctx.strokeStyle = '#00a6ff';
-        ctx.stroke();
-        // Camera body + viewfinder bump + lens.
-        ctx.fillStyle = '#00a6ff';
-        ctx.fillRect(14, 24, 36, 22);
-        ctx.fillRect(24, 19, 16, 5);
-        ctx.beginPath();
-        ctx.arc(32, 35, 8, 0, Math.PI * 2);
-        ctx.fillStyle = '#ffffff';
-        ctx.fill();
-        ctx.beginPath();
-        ctx.arc(32, 35, 4, 0, Math.PI * 2);
-        ctx.fillStyle = '#00a6ff';
-        ctx.fill();
-        return canvas;
-    }
-
-    addLiveCamLayer() {
-        const me = this,
-            map = me.map;
-
-        me.liveCamTotal = LIVE_CAMS.length;
-        if (!map.getStyle() || map.getLayer('go-live-cams')) {
-            return;
-        }
-        if (!map.hasImage('go-live-cam-icon')) {
-            map.addImage('go-live-cam-icon', me.createLiveCamIcon());
-        }
-        map.addSource('go-live-cams', {
-            type: 'geojson',
-            data: {
-                type: 'FeatureCollection',
-                features: LIVE_CAMS.map(cam => ({
-                    type: 'Feature',
-                    properties: {id: cam.id, videoId: cam.videoId, title: cam.title},
-                    geometry: {type: 'Point', coordinates: [cam.lng, cam.lat]}
-                }))
-            }
-        });
-        map.addLayer({
-            id: 'go-live-cams',
-            type: 'symbol',
-            source: 'go-live-cams',
-            layout: {
-                'icon-image': 'go-live-cam-icon',
-                'icon-size': 0.75,
-                'icon-allow-overlap': true
-            },
-            // Hidden until the first liveness check confirms a stream.
-            filter: ['in', ['get', 'id'], ['literal', []]]
-        });
-        me.applyGoCamVisibility();
-
-        if (!me.liveCamListenersAdded) {
-            me.liveCamListenersAdded = true;
-            map.on('click', e => {
-                const hits = map.queryRenderedFeatures(e.point, {layers: ['go-live-cams']});
-
-                if (hits.length) {
-                    const {videoId, title} = hits[0].properties;
-
-                    new AnimatedPopup({className: 'popup-live-cam', maxWidth: '360px'})
-                        .setLngLat(hits[0].geometry.coordinates)
-                        .setHTML([
-                            `<div class="live-cam-title">${title}</div>`,
-                            `<iframe width="320" height="180" src="https://www.youtube.com/embed/${videoId}?autoplay=1" title="${title}" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>`
-                        ].join(''))
-                        .addTo(map);
-                }
-            });
-            // Only ever set the pointer cursor, never clear it: the
-            // main hover handler owns clearing (stations, vehicles).
-            map.on('mousemove', e => {
-                if (map.queryRenderedFeatures(e.point, {layers: ['go-live-cams']}).length) {
-                    map.getCanvas().style.cursor = 'pointer';
-                }
-            });
-        }
-    }
-
-    ensureYouTubeAPI() {
-        const me = this;
-
-        if (window.YT && window.YT.Player) {
-            return Promise.resolve(true);
-        }
-        if (!me.ytApiLoading) {
-            me.ytApiLoading = new Promise(resolve => {
-                const prev = window.onYouTubeIframeAPIReady;
-
-                window.onYouTubeIframeAPIReady = () => {
-                    if (prev) {
-                        prev();
-                    }
-                    resolve(true);
-                };
-                const script = document.createElement('script');
-
-                script.src = 'https://www.youtube.com/iframe_api';
-                script.onerror = () => resolve(false);
-                document.head.appendChild(script);
-                setTimeout(() => resolve(!!(window.YT && window.YT.Player)), 10000);
-            }).then(ok => {
-                if (!ok) {
-                    // Retry on the next tick instead of caching failure.
-                    me.ytApiLoading = null;
-                }
-                return ok;
-            });
-        }
-        return me.ytApiLoading;
-    }
-
-    checkLiveCam(cam) {
-        return new Promise(resolve => {
-            const holder = document.createElement('div');
-
-            holder.style.cssText = 'position:absolute;left:-9999px;top:-9999px;width:1px;height:1px;overflow:hidden;';
-            document.body.appendChild(holder);
-
-            let done = false;
-
-            const finish = live => {
-                if (done) {
-                    return;
-                }
-                done = true;
-                try {
-                    player.destroy();
-                } catch (error) {}
-                holder.remove();
-                resolve(live);
-            };
-            const player = new window.YT.Player(holder, {
-                videoId: cam.videoId,
-                playerVars: {autoplay: 1, mute: 1},
-                events: {
-                    onReady: e => {
-                        e.target.mute();
-                        e.target.playVideo();
-                    },
-                    onError: () => finish(false),
-                    onStateChange: e => {
-                        const state = e.data,
-                            PlayerState = window.YT.PlayerState;
-
-                        if (state === PlayerState.PLAYING || state === PlayerState.BUFFERING) {
-                            // A live stream reports no duration; a
-                            // recording of a past stream reports one.
-                            // Prefer an explicit isLive flag when present.
-                            try {
-                                const data = player.getVideoData() || {};
-                                let live;
-
-                                if (data.isLive === true) {
-                                    live = true;
-                                } else if (data.isLive === false) {
-                                    live = false;
-                                } else {
-                                    live = player.getDuration() === 0;
-                                }
-                                finish(live);
-                            } catch (error) {
-                                // Metadata not ready yet; keep waiting
-                                // for the timeout rather than guessing.
-                            }
-                        } else if (state === PlayerState.ENDED) {
-                            finish(false);
-                        }
-                    }
-                }
-            });
-
-            setTimeout(() => finish(false), 10000);
-        });
-    }
-
-    refreshLiveCams() {
-        const me = this,
-            map = me.map;
-
-        me.addLiveCamLayer();
-        if (!map.getLayer('go-live-cams')) {
-            return;
-        }
-        me.ensureYouTubeAPI().then(ok => {
-            if (!ok) {
-                return;
-            }
-            return Promise.all(LIVE_CAMS.map(cam => me.checkLiveCam(cam)));
-        }).then(results => {
-            if (!results) {
-                return;
-            }
-            const liveIds = LIVE_CAMS.filter((cam, i) => results[i]).map(cam => cam.id);
-
-            me.liveCamIds = liveIds;
-            map.setFilter('go-live-cams', ['in', ['get', 'id'], ['literal', liveIds]]);
-            if (me.goLayerPanel && me.goLayerPanel.isOpen()) {
-                me.goLayerPanel.updateCamRow(me, liveIds.length);
-            }
         });
     }
 

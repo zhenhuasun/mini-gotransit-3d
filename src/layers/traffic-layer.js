@@ -272,14 +272,6 @@ export default class {
 
     updateObject(object, timeOffset, duration, accelerationTime, normalizedAcceleration, decelerationTime, normalizedDeceleration) {
         const me = this;
-
-        // A bus on a hidden route has no GPU instance (see busStart),
-        // but its animation chain keeps running so it reappears at the
-        // right position when the route is shown again.
-        if (object.instanceID === undefined) {
-            return;
-        }
-
         let sectionIndex, nextSectionIndex;
 
         if (object.type === 'train') {
