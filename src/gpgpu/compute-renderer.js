@@ -147,6 +147,10 @@ export default class {
         this.dtObject.update(instanceID, sectionIndex, nextSectionIndex, timeOffset, duration, accelerationTime, normalizedAcceleration, decelerationTime, normalizedDeceleration);
     }
 
+    updateInstanceDelay(instanceID, delay) {
+        this.dtObject.updateDelay(instanceID, delay);
+    }
+
     removeInstance(instanceID) {
         return this.dtObject.remove(instanceID);
     }

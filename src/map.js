@@ -1409,7 +1409,7 @@ export default class extends Evented {
             callback: () => {
                 const clock = me.clock,
                     now = clock.getTime(),
-                    {minDelay, refreshInterval, realtimeCheckInterval} = configs;
+                    {minDelay, refreshInterval, realtimeCheckInterval, tripUpdateCheckInterval} = configs;
 
                 if (now - me.lastTimetableRefresh >= 86400000) {
                     me.refreshTrainTimetableData();
@@ -1500,6 +1500,13 @@ export default class extends Evented {
                         }
                     }
                     me.lastRealtimeCheck = now - minDelay;
+                }
+
+                if (Math.floor((now - minDelay) / tripUpdateCheckInterval) !== Math.floor(me.lastTripUpdateCheck / tripUpdateCheckInterval)) {
+                    if (me.searchMode === 'none' && me.clockMode === 'realtime' && !me.removing) {
+                        me.refreshTripUpdateData();
+                    }
+                    me.lastTripUpdateCheck = now - minDelay;
                 }
 
                 if ((me.ecoMode === 'normal' && map._loaded) || Date.now() - me.lastRepaint >= 1000 / me.ecoFrameRate) {
@@ -2614,6 +2621,7 @@ export default class extends Evented {
                     activeBusLookup: new ActiveObjectLookup(),
                     realtimeBuses: new Set(),
                     vehiclePositionUrl: source.vehiclePositionUrl,
+                    tripUpdateUrl: source.tripUpdateUrl,
                     color: source.color,
                     routeGroupIndex: me.trafficLayer.addRouteGroup(routeData),
                     colorGroupIndex: me.trafficLayer.addColorGroup([{id, color: source.color}])
@@ -3271,11 +3279,103 @@ export default class extends Evented {
                         )];
                     }
                     if (!isActive) {
+                        const tripDelay = me.getTripDelay(gtfs, tripId, me.clock.getTime());
+                        if (tripDelay) {
+                            bus.delay = tripDelay.delay;
+                            bus.delayLevel = tripDelay.level;
+                        }
                         me.busStart(bus);
                     }
                 }
 
                 me.aboutPanel.updateContent();
+            }).catch(error => {
+                console.log(error);
+            });
+        }
+    }
+
+    // Delay of a trip's vehicle right now, from its TripUpdates table:
+    // the most recently departed stop's delay (the first stop's delay
+    // before departure). Returns null when the trip has no table entry.
+    // Level: 0 = no sphere (on time, early, or under 3 min late),
+    // 1 = yellow sphere (3-14 min late), 2 = red sphere (15+ min late).
+    getTripDelay(gtfs, tripId, now) {
+        const stops = gtfs.tripDelayTable && gtfs.tripDelayTable.get(tripId);
+        if (!stops) {
+            return null;
+        }
+        let delay = stops[0].delay;
+        for (const stop of stops) {
+            if (stop.time <= now) {
+                delay = stop.delay;
+            } else {
+                break;
+            }
+        }
+        return {delay, level: delay >= 900 ? 2 : delay >= 180 ? 1 : 0};
+    }
+
+    // TripUpdates delay data for GO vehicles, refreshed every 30s in
+    // realtime mode only (playback runs timetable buses with no
+    // realtime data, so no spheres appear there). Each active bus gets
+    // its trip's current delay level; the traffic layer turns it into
+    // a yellow or red sphere around the vehicle.
+    refreshTripUpdateData(gtfsId) {
+        const me = this;
+
+        for (const gtfs of gtfsId ? [me.gtfs.get(gtfsId)] : me.gtfs.values()) {
+            const {tripUpdateUrl, activeBusLookup, realtimeBuses} = gtfs;
+
+            if (!tripUpdateUrl) {
+                continue;
+            }
+
+            loadDynamicBusData(tripUpdateUrl).then(data => {
+                const delayByTrip = new Map();
+
+                for (const {tripUpdate: tu} of data.entity) {
+                    if (!tu || !tu.trip || !tu.trip.tripId) {
+                        continue;
+                    }
+
+                    const stops = [];
+                    for (const s of tu.stopTimeUpdate || []) {
+                        const departure = s.departure;
+                        if (!departure || departure.delay === undefined || departure.delay === null || !departure.time) {
+                            continue;
+                        }
+                        // Skipped stops carry no meaningful delay for a
+                        // vehicle that never serves them.
+                        if (s.scheduleRelationship === 1 || s.scheduleRelationship === 'SKIPPED') {
+                            continue;
+                        }
+                        stops.push({time: departure.time * 1000, delay: departure.delay});
+                    }
+                    if (stops.length) {
+                        stops.sort((a, b) => a.time - b.time);
+                        delayByTrip.set(tu.trip.tripId, stops);
+                    }
+                }
+
+                gtfs.tripDelayTable = delayByTrip;
+
+                const now = me.clock.getTime();
+                for (const tripId of realtimeBuses) {
+                    const bus = activeBusLookup.get(tripId);
+                    if (!bus) {
+                        continue;
+                    }
+                    const tripDelay = me.getTripDelay(gtfs, tripId, now);
+                    if (!tripDelay) {
+                        continue;
+                    }
+                    if (bus.delayLevel !== tripDelay.level) {
+                        bus.delay = tripDelay.delay;
+                        bus.delayLevel = tripDelay.level;
+                        me.trafficLayer.setObjectDelay(bus, tripDelay.level);
+                    }
+                }
             }).catch(error => {
                 console.log(error);
             });
@@ -4179,6 +4279,7 @@ function normalizeDataSource(source, secrets) {
         atisUrl: updateOdptUrl(source.atisUrl, secrets),
         gtfsUrl: updateOdptUrl(source.gtfsUrl, secrets),
         vehiclePositionUrl: updateOdptUrl(source.vehiclePositionUrl, secrets),
+        tripUpdateUrl: updateOdptUrl(source.tripUpdateUrl, secrets),
         color: source.color,
         expiresAt: source.expiresAt
     };

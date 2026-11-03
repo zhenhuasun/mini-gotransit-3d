@@ -32,6 +32,7 @@
 			matchSelection = location.search.match(/selection=(.*?)(?:&|$)/),
 			matchGtfsUrl = location.search.match(/gtfsurl=(.*?)(?:&|$)/),
 			matchVehiclePositionUrl = location.search.match(/gtfsvpurl=(.*?)(?:&|$)/),
+			matchTripUpdateUrl = location.search.match(/gtfstpurl=(.*?)(?:&|$)/),
 			matchGtfsColor = location.search.match(/gtfscolor=(.*?)(?:&|$)/),
 			matchHash = location.hash.match(/[^\d\.\-]*([\d\.\-]*)\/?([\d\.\-]*)\/?([\d\.\-]*)\/?([\d\.\-]*)\/?([\d\.\-]*)/),
 			options = {
@@ -48,6 +49,7 @@
 					id: 'go',
 					gtfsUrl: 'https://raw.githubusercontent.com/zhenhuasun/mini-gotransit-3d/master/gtfs/GO-GTFS-slim.zip',
 					vehiclePositionUrl: 'https://go-3d-tracker-proxy.zhenhuasun.workers.dev/api/gtfs-rt/vp',
+					tripUpdateUrl: 'https://go-3d-tracker-proxy.zhenhuasun.workers.dev/api/gtfs-rt/tu',
 					color: '#00A651'
 				}]
 			};
@@ -79,6 +81,7 @@
 				id: 'gtfs',
 				gtfsUrl: decodeURIComponent(matchGtfsUrl[1]),
 				vehiclePositionUrl: matchVehiclePositionUrl ? decodeURIComponent(matchVehiclePositionUrl[1]) : undefined,
+				tripUpdateUrl: matchTripUpdateUrl ? decodeURIComponent(matchTripUpdateUrl[1]) : undefined,
 				color: `#${decodeURIComponent(matchGtfsColor[1])}`
 			}];
 		}

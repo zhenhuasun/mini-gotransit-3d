@@ -1,4 +1,4 @@
-import {AdditiveBlending, BoxGeometry, CustomBlending, MaxEquation, Mesh, MeshLambertMaterial, MultiplyBlending, OneFactor, ShaderMaterial, SphereGeometry} from 'three';
+import {AdditiveBlending, BoxGeometry, CustomBlending, MaxEquation, Mesh, MeshLambertMaterial, MultiplyBlending, OneFactor, ShaderMaterial, SphereGeometry, Vector3} from 'three';
 import {blink} from '../helpers/helpers';
 import AircraftGeometry from './aircraft-geometry.js';
 import CarGeometry from './car-geometry.js';
@@ -103,12 +103,23 @@ export default class {
 
         baseGeometry.dispose();
 
-        if (type === 'CAR') {
+        // Delay marker spheres: Tokyo trains (CAR) keep a single orange
+        // marker; GO vehicles (BUS) get yellow (3-14 min late) and red
+        // (15+ min late) markers driven by TripUpdates delay levels.
+        const delayMarkerColors = type === 'CAR' ? [
+            ['delayMarker', [1.0, 0.6, 0.0]]
+        ] : type === 'BUS' ? [
+            ['delayMarkerYellow', [1.0, 0.85, 0.0]],
+            ['delayMarkerRed', [0.95, 0.15, 0.15]]
+        ] : [];
+
+        for (const [key, color] of delayMarkerColors) {
             const sphereGeometry = new SphereGeometry(1.8, 32, 32);
-            const delayMarkerGeometry = me.delayMarkerGeometry = new InstancedGeometry(sphereGeometry, count);
-            const delayMarkerMaterial = me.delayMarkerMaterial = new ShaderMaterial({
+            const geometry = me[`${key}Geometry`] = new InstancedGeometry(sphereGeometry, count);
+            const material = me[`${key}Material`] = new ShaderMaterial({
                 uniforms: Object.assign({}, uniforms, {
-                    base: {value: 1}
+                    base: {value: 1},
+                    markerColor: {value: new Vector3(...color)}
                 }),
                 vertexShader: delayMarkerVertexShader,
                 fragmentShader: delayMarkerFragmentShader,
@@ -117,11 +128,11 @@ export default class {
                 depthWrite: false
             });
 
-            const delayMarkerMesh = me.delayMarkerMesh = new Mesh(delayMarkerGeometry, delayMarkerMaterial);
+            const mesh = me[`${key}Mesh`] = new Mesh(geometry, material);
 
-            delayMarkerMesh.updateMatrix();
-            delayMarkerMesh.matrixAutoUpdate = false;
-            delayMarkerMesh.frustumCulled = false;
+            mesh.updateMatrix();
+            mesh.matrixAutoUpdate = false;
+            mesh.frustumCulled = false;
 
             sphereGeometry.dispose();
         }
@@ -142,6 +153,14 @@ export default class {
 
     getDelayMarkerMesh() {
         return this.delayMarkerMesh;
+    }
+
+    getDelayMarkerYellowMesh() {
+        return this.delayMarkerYellowMesh;
+    }
+
+    getDelayMarkerRedMesh() {
+        return this.delayMarkerRedMesh;
     }
 
     refreshCameraParams(params) {
@@ -171,6 +190,12 @@ export default class {
         if (delayMarkerGeometry) {
             delayMarkerGeometry.setInstanceIDs(ids.delayMarker);
         }
+        if (me.delayMarkerYellowGeometry) {
+            me.delayMarkerYellowGeometry.setInstanceIDs(ids.delayMarkerYellow);
+        }
+        if (me.delayMarkerRedGeometry) {
+            me.delayMarkerRedGeometry.setInstanceIDs(ids.delayMarkerRed);
+        }
     }
 
     setMarkedInstanceID(id) {
@@ -190,6 +215,16 @@ export default class {
         if (delayMarkerMesh) {
             delayMarkerMesh.material.blending = dark ? AdditiveBlending : MultiplyBlending;
         }
+        for (const key of ['delayMarkerYellow', 'delayMarkerRed']) {
+            const material = this[`${key}Material`],
+                mesh = this[`${key}Mesh`];
+            if (material) {
+                material.uniforms.base.value = dark ? 0 : 1;
+            }
+            if (mesh) {
+                mesh.material.blending = dark ? AdditiveBlending : MultiplyBlending;
+            }
+        }
     }
 
     dispose() {
@@ -206,6 +241,16 @@ export default class {
         }
         if (delayMarkerMaterial) {
             delayMarkerMaterial.dispose();
+        }
+        for (const key of ['delayMarkerYellow', 'delayMarkerRed']) {
+            const geometry = me[`${key}Geometry`],
+                material = me[`${key}Material`];
+            if (geometry) {
+                geometry.dispose();
+            }
+            if (material) {
+                material.dispose();
+            }
         }
     }
 

@@ -61,6 +61,8 @@ export default class {
 
         scene.add(ugCarMeshSet.getDelayMarkerMesh());
         scene.add(ogCarMeshSet.getDelayMarkerMesh());
+        scene.add(busMeshSet.getDelayMarkerYellowMesh());
+        scene.add(busMeshSet.getDelayMarkerRedMesh());
 
         me.glowPipeline.add(ugCarMeshSet.getOutlineMesh());
         me.glowPipeline.add(ogCarMeshSet.getOutlineMesh());
@@ -256,6 +258,9 @@ export default class {
             colorIndex = me.computeRenderer.getColorIndex(`${gtfsId}.${trip.route}`);
             sectionIndex = stopOffsets[object.sectionIndex];
             nextSectionIndex = stopOffsets[object.sectionIndex + object.sectionLength];
+            // GO delay level in seconds from TripUpdates: 1 = yellow
+            // (3-14 min late), 2 = red (15+ min late), else no sphere.
+            delay = object.delay >= 900 ? 2 : object.delay >= 180 ? 1 : 0;
         }
 
         const instanceID = object.instanceID = me.computeRenderer.addInstance(objectType, routeIndex, colorIndex, sectionIndex, nextSectionIndex, delay);
@@ -360,6 +365,7 @@ export default class {
 
         me.ugCarMeshSet.refreshDelayMarkerMesh(dark);
         me.ogCarMeshSet.refreshDelayMarkerMesh(dark);
+        me.busMeshSet.refreshDelayMarkerMesh(dark);
     }
 
     setTimeOffset(timeOffset) {
@@ -390,6 +396,15 @@ export default class {
         me.busMeshSet.setTrackedInstanceID(instanceID);
         me.trackedInstanceID = instanceID;
         me.needsUpdateInstances = true;
+    }
+
+    setObjectDelay(object, delay) {
+        const me = this;
+
+        if (object.instanceID !== undefined) {
+            me.computeRenderer.updateInstanceDelay(object.instanceID, delay);
+            me.needsUpdateInstances = true;
+        }
     }
 
     project(lnglat, altitude) {

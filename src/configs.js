@@ -55,6 +55,9 @@ const configs = {
     // Interval of checking train and bus positions based on real-time data in milliseconds
     realtimeCheckInterval: 15000,
 
+    // Interval of checking TripUpdates delay data in milliseconds
+    tripUpdateCheckInterval: 30000,
+
     // Maximum train speed in km/h
     maxSpeedKMPH: 80,
 

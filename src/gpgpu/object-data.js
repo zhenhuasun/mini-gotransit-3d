@@ -71,6 +71,14 @@ export default class {
         floatTexture.needsUpdate = true;
     }
 
+    updateDelay(instanceID, delay) {
+        const me = this,
+            uintArray = me.uintTexture.image.data;
+
+        uintArray[instanceID * 8 + 7] = delay;
+        me.uintTexture.needsUpdate = true;
+    }
+
     remove(instanceID) {
         return new Promise(resolve => {
             const me = this,
@@ -107,7 +115,7 @@ export default class {
             ugCarIDs = {body: [], delayMarker: [], outline: []},
             ogCarIDs = {body: [], delayMarker: [], outline: []},
             aircraftIDs = {body: [], outline: []},
-            busIDs = {body: [], outline: []};
+            busIDs = {body: [], delayMarkerYellow: [], delayMarkerRed: [], outline: []};
 
         for (let i = 0, ilen = me.count; i < ilen; i++) {
             const offset = i * 8,
@@ -121,7 +129,13 @@ export default class {
 
                 ids.body.push(i);
                 if (delay === 1) {
-                    ids.delayMarker.push(i);
+                    if (ids.delayMarker) {
+                        ids.delayMarker.push(i);
+                    } else if (ids.delayMarkerYellow) {
+                        ids.delayMarkerYellow.push(i);
+                    }
+                } else if (delay === 2 && ids.delayMarkerRed) {
+                    ids.delayMarkerRed.push(i);
                 }
                 if (i === me.marked || i === me.tracked) {
                     ids.outline.push(i);
