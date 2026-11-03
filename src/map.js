@@ -2384,18 +2384,6 @@ export default class extends Evented {
             }
         }
 
-        // Platform: cached value when fresh, else a dash; trains with
-        // a known API trip number trigger an async fill for the
-        // at-stop platform (see fetchStopPlatform). Buses have no
-        // platforms, so they keep the dash and never fetch.
-        const platformFor = stopId => {
-            const entry = me.platformCache && me.platformCache.get(`${trip.id}.${stopId}`);
-            return entry && Date.now() - entry.time < 60000 && entry.value ? entry.value : '-';
-        };
-        if (isTrain && sag && sag.trip && atStopId) {
-            me.fetchStopPlatform(bus, atStopId, sag.trip);
-        }
-
         const badge = shortName || longName ? `<span class="bus-route-label" style="${labelStyle}">${shortName || longName}</span>` : '',
             title = shortName && longName ? `${badge} <strong>${longName}</strong>` : `<strong>${badge || longName || ''}</strong>`;
 
@@ -2415,13 +2403,7 @@ export default class extends Evented {
             ].join('') : '',
             '<div class="desc-row"><span><strong>Status:</strong> ',
             `<span style="color: ${statusColor};">${statusText}</span></span><span style="color: ${delayColor};">${delayText}</span></div>`,
-            atStopId ? [
-                '<div class="desc-row"><span><strong>At stop:</strong> ',
-                atStopName,
-                '</span><span><strong>Platform:</strong> ',
-                platformFor(atStopId),
-                '</span></div>'
-            ].join('') : `<strong>Previous stop:</strong> ${prevStopName}<br>`,
+            atStopId ? `<strong>At stop:</strong> ${atStopName}<br>` : `<strong>Previous stop:</strong> ${prevStopName}<br>`,
             `<strong>Next stop:</strong> ${nextStopName}`
         ].join('');
     }
@@ -3380,6 +3362,13 @@ export default class extends Evented {
                 }
 
                 me.aboutPanel.updateContent();
+
+                // Same reason as the TripUpdates tick below: vehicle
+                // status changes on this tick, so refresh the hovered
+                // popup's text with it.
+                if (me.markedObject && isVehicle(me.markedObject)) {
+                    me.updatePopup({setHTML: true});
+                }
             }).catch(error => {
                 console.log(error);
             });
@@ -3459,6 +3448,14 @@ export default class extends Evented {
                     }
                     const tripDelay = me.getTripDelay(gtfs, tripId, now);
                     if (!tripDelay) {
+                        // Trip dropped from TripUpdates: clear any stale
+                        // sphere so the marker never outlives its delay
+                        // data (the popup already shows Unavailable).
+                        if (bus.delayLevel) {
+                            bus.delayLevel = undefined;
+                            bus.delay = undefined;
+                            me.trafficLayer.setObjectDelay(bus, 0);
+                        }
                         continue;
                     }
                     if (bus.delayLevel !== tripDelay.level) {
@@ -3467,15 +3464,25 @@ export default class extends Evented {
                         me.trafficLayer.setObjectDelay(bus, tripDelay.level);
                     }
                 }
+
+                // The popup text used to rebuild only on section
+                // changes, so it lagged behind the spheres (which
+                // refresh on every TripUpdates tick) whenever live
+                // predictions revised a delay mid-leg. Rebuild the
+                // hovered vehicle's popup on the same tick so the two
+                // always show the same delay data.
+                if (me.markedObject && isVehicle(me.markedObject)) {
+                    me.updatePopup({setHTML: true});
+                }
             }).catch(error => {
                 console.log(error);
             });
         }
     }
 
-    // Service at a Glance vehicle data (car counts + API trip numbers
-    // for trains), refreshed every 60s in realtime mode. Keyed by fleet
-    // number, which matches the vehicle number shown in the popup.
+    // Service at a Glance vehicle data (car counts for trains),
+    // refreshed every 60s in realtime mode. Keyed by fleet number,
+    // which matches the vehicle number shown in the popup.
     refreshServiceAtGlanceData() {
         const me = this;
 
@@ -3498,56 +3505,11 @@ export default class extends Evented {
             const byFleet = new Map();
             for (const vehicle of data.vehicles || []) {
                 if (vehicle.fleet) {
-                    byFleet.set(String(vehicle.fleet), {cars: vehicle.cars, trip: vehicle.trip});
+                    byFleet.set(String(vehicle.fleet), {cars: vehicle.cars});
                 }
             }
             me.sagByFleet = byFleet;
         }).catch(error => {
-            console.log(error);
-        });
-    }
-
-    // Platform of one stop for one vehicle, from NextService departures
-    // matched by the Service at a Glance trip number. The popup is
-    // synchronous, so the platform fills in asynchronously: the value
-    // is cached (60s) and the popup rebuilds only if this vehicle is
-    // still hovered. Until the Worker serves the platform field, or the
-    // API leaves it empty, the popup shows a dash.
-    fetchStopPlatform(bus, stopId, sagTrip) {
-        const me = this,
-            key = `${bus.trip.id}.${stopId}`,
-            cached = me.platformCache && me.platformCache.get(key);
-
-        if (cached && Date.now() - cached.time < 60000) {
-            return;
-        }
-        me.platformCache = me.platformCache || new Map();
-        me.platformFetching = me.platformFetching || new Set();
-        if (me.platformFetching.has(key)) {
-            return;
-        }
-        me.platformFetching.add(key);
-
-        const gtfs = me.gtfs.get(bus.gtfsId);
-        let origin;
-        if (gtfs && gtfs.vehiclePositionUrl) {
-            try {
-                origin = new URL(gtfs.vehiclePositionUrl).origin;
-            } catch (error) {
-                // fall through to the default origin
-            }
-        }
-        origin = origin || 'https://go-3d-tracker-proxy.zhenhuasun.workers.dev';
-
-        fetch(`${origin}/api/departures?stop=${encodeURIComponent(stopId)}`).then(res => res.json()).then(data => {
-            const row = (data.departures || []).find(departure => departure.trip === sagTrip);
-            me.platformCache.set(key, {value: (row && row.platform) || '', time: Date.now()});
-            me.platformFetching.delete(key);
-            if (me.markedObject === bus) {
-                me.updatePopup({setHTML: true});
-            }
-        }).catch(error => {
-            me.platformFetching.delete(key);
             console.log(error);
         });
     }
