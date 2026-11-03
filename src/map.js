@@ -1247,7 +1247,19 @@ export default class extends Evented {
             if (performance.now() < tapSuppressUntil) {
                 return;
             }
-            me.markObject(me.pickObject(e.point));
+            const object = me.pickObject(e.point);
+            me.markObject(object);
+            if (!object) {
+                // Pointer cursor over station circles (labels and
+                // circles share the layers queried on click).
+                const stationLayers = [];
+                for (const {id} of me.gtfs.values()) {
+                    stationLayers.push(`busstops-circle-rail-${id}`, `busstops-circle-bus-${id}`);
+                }
+                const hits = stationLayers.length ?
+                    map.queryRenderedFeatures(e.point, {layers: stationLayers}) : [];
+                map.getCanvas().style.cursor = hits.length ? 'pointer' : '';
+            }
         });
 
         map.on('mouseout', () => {
@@ -1271,13 +1283,13 @@ export default class extends Evented {
                 // GTFS station departure board: a click on a station name
                 // label opens the board for that station. Clicking
                 // empty space closes an open board.
-                const poiLayers = [];
+                const stationLayers = [];
 
                 for (const {id} of me.gtfs.values()) {
-                    poiLayers.push(`busstops-poi-${id}`);
+                    stationLayers.push(`busstops-poi-${id}`, `busstops-circle-rail-${id}`, `busstops-circle-bus-${id}`);
                 }
-                const hits = poiLayers.length ?
-                    map.queryRenderedFeatures(e.point, {layers: poiLayers}) : [];
+                const hits = stationLayers.length ?
+                    map.queryRenderedFeatures(e.point, {layers: stationLayers}) : [];
 
                 if (hits.length) {
                     const hit = hits[0],
@@ -2751,6 +2763,31 @@ export default class extends Evented {
                         }, 'railways-og-13');
                         layerIds.add(`${key}-${id}-og-${zoom}`);
                     }
+                }
+
+                // Station circles, visible at every zoom: rail stations
+                // always 2.5px larger than bus stops (constant gap, so
+                // the ordering holds at every zoom, clamped ends incl.).
+                // Added before the label layer so labels draw on top.
+                for (const [key, radius] of [
+                    ['rail', ['interpolate', ['linear'], ['zoom'], 5, 4.5, 10, 5.5, 16, 7.5]],
+                    ['bus', ['interpolate', ['linear'], ['zoom'], 5, 2, 10, 3, 16, 5]]
+                ]) {
+                    me.addLayer({
+                        id: `busstops-circle-${key}-${id}`,
+                        type: 'circle',
+                        source: id,
+                        filter: ['all', ['==', ['get', 'type'], 2], ['==', ['get', 'rail'], key === 'rail' ? 1 : 0]],
+                        paint: {
+                            'circle-color': '#ffffff',
+                            'circle-opacity': 0.85,
+                            'circle-radius': radius,
+                            'circle-stroke-color': '#333333',
+                            'circle-stroke-opacity': 0.9,
+                            'circle-stroke-width': 1
+                        }
+                    });
+                    layerIds.add(`busstops-circle-${key}-${id}`);
                 }
 
                 me.addLayer({

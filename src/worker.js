@@ -464,7 +464,10 @@ function getFeatureCollection(shapes, stops, translations) {
             type: 2,
             name: translations ?
                 translations.get(`stops.stop_name.${id}`) || translations.get(`stops.stop_name.${name}`) || name :
-                name
+                name,
+            // Rail stations (letter ids except PA, the bus terminal)
+            // render larger circles than bus stops; see map.js.
+            rail: /^[A-Z]+$/.test(id) && id !== 'PA' ? 1 : 0
         }));
 
         if (stopGroups.has(name)) {
