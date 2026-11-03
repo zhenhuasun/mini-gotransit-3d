@@ -105,7 +105,10 @@ export default class extends Panel {
             }
         }
 
-        // Platform source (Union only): UnionDepartures joined by trip number.
+        // Platform enrichment: UnionDepartures is the only API that
+        // publishes platform numbers, so it only covers Union stops.
+        // Every other stop still gets a board; its Platform column
+        // simply shows — until a general platform source exists.
         if (isUnion) {
             try {
                 const res = await fetch(`${origin}/api/union-departures`);
@@ -148,9 +151,11 @@ export default class extends Panel {
                     }
                 }
             }
-            sourceNote = '实时 · Live';
+            sourceNote = 'Live';
         } else if (unionRows) {
-            // No per-stop predictions (e.g. Bus Terminal code unknown):
+            // No per-stop predictions (e.g. bus-stop API code unknown):
+            // fall back to UnionDepartures rows of this mode for Union
+            // stops; other stops fall through to the static timetable.
             // use UnionDepartures rows of this mode, if recognizable.
             const modeRows = stopId === 'UN' ?
                 unionRows.filter(isTrainRow) :
@@ -166,27 +171,27 @@ export default class extends Panel {
                     color: '',
                     textColor: ''
                 }));
-                sourceNote = '实时 · Live';
+                sourceNote = 'Live';
             }
         }
 
         if (!rows.length) {
             // Fallback: GTFS static timetable for this stop.
             rows = me.computeStaticRows(gtfs, stopId);
-            sourceNote = 'API 暂不可用，显示时刻表 · Timetable (API unavailable)';
+            sourceNote = 'Timetable (API unavailable)';
         }
 
         rows = rows.slice(0, MAX_ROWS);
-        me.setTitle(`${stopName} Departures 出发`);
+        me.setTitle(`${stopName} Departures`);
         me.setHTML([
             '<div style="padding:8px 12px;opacity:.7">',
-            `${sourceNote} · ${rows.length} 班次`,
+            `${sourceNote} · ${rows.length} departures`,
             '</div>',
             '<div style="display:flex;align-items:center;gap:8px;padding:4px 12px;opacity:.6;font-size:12px">',
-            '<span style="flex:1">线路 · 目的地</span>',
-            '<span style="min-width:52px;text-align:right">时刻</span>',
-            '<span style="min-width:64px;text-align:right">预计</span>',
-            '<span style="min-width:40px;text-align:right">站台</span>',
+            '<span style="flex:1">Line · Destination</span>',
+            '<span style="min-width:52px;text-align:right">Scheduled</span>',
+            '<span style="min-width:64px;text-align:right">Expected</span>',
+            '<span style="min-width:40px;text-align:right">Platform</span>',
             '</div>',
             ...rows.map(row => {
                 const schedMin = toMinutes(row.scheduled),
@@ -214,7 +219,7 @@ export default class extends Panel {
                     '</div>'
                 ].join('');
             }),
-            rows.length ? '' : '<div style="padding:8px 12px">暂无出发班次 · No departures</div>'
+            rows.length ? '' : '<div style="padding:8px 12px">No departures</div>'
         ].join(''));
 
         return me;
