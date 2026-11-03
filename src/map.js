@@ -3874,6 +3874,15 @@ export default class extends Evented {
         }
 
         if (object) {
+            // A station departure board is not a tracked object, so
+            // the deselection cleanup above does not remove it. Drop
+            // any previous panel here, or it stays orphaned behind
+            // the new one (and no later click can close it, since
+            // detailPanel no longer points at it).
+            if (me.detailPanel) {
+                me.detailPanel.remove();
+                delete me.detailPanel;
+            }
             me.trackedObject = object;
 
             if (isVehicle(object)) {
