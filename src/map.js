@@ -16,7 +16,7 @@ import * as helpersMapbox from './helpers/helpers-mapbox';
 import * as helpersWebgl from './helpers/helpers-webgl';
 import {GeoJsonLayer, GlowCompositeLayer, RailwayStatusGlowLayer, STROKE_WIDTH_SCALE_STOPS, StationGlowLayer, ThreeLayer, Tile3DLayer, TrafficLayer, ZoomWidthScaleExtension} from './layers';
 import {isExpired, loadBusData, loadDictionary, loadDynamicBusData, loadDynamicFlightData, loadDynamicTrainData, loadStaticData, loadTimetableData, updateOdptUrl} from './loader';
-import {AboutPanel, BusPanel, DepartureBoardPanel, LayerPanel, SharePanel, StationPanel, TrackingModePanel, TrainPanel} from './panels';
+import {AboutPanel, BusPanel, LayerPanel, SharePanel, StationPanel, TrackingModePanel, TrainPanel} from './panels';
 import Plugin from './plugin';
 import nearestCloserPointOnLine from './turf/nearest-closer-point-on-line';
 
@@ -1102,13 +1102,12 @@ export default class extends Evented {
                     }
 
                     // GTFS-only mode has no mini-tokyo-3d station groups, so
-                    // fly to the matching GTFS stop instead, and open its
-                    // departure board (item 6).
+                    // fly to the matching GTFS stop instead. (A departure
+                    // board popup for the station is a separate feature.)
                     const gtfsStation = me.gtfsStationLookup && me.gtfsStationLookup.get(value.toUpperCase());
 
                     if (gtfsStation && gtfsStation.coord) {
                         map.flyTo({center: gtfsStation.coord, zoom: 15});
-                        me.openDepartureBoard(gtfsStation.id, gtfsStation.name);
                         return true;
                     }
                 }
@@ -1266,35 +1265,6 @@ export default class extends Evented {
 
             me.markObject(object);
             me.trackObject(object);
-
-            if (!object) {
-                // GTFS station departure board: a click on a station name
-                // label opens the board for that station. Clicking
-                // empty space closes an open board.
-                const poiLayers = [];
-
-                for (const {id} of me.gtfs.values()) {
-                    poiLayers.push(`busstops-poi-${id}`);
-                }
-                const hits = poiLayers.length ?
-                    map.queryRenderedFeatures(e.point, {layers: poiLayers}) : [];
-
-                if (hits.length) {
-                    const hitName = hits[0].properties.name;
-
-                    for (const gtfs of me.gtfs.values()) {
-                        const stop = gtfs.stops.getAll().find(s => s.name === hitName);
-
-                        if (stop) {
-                            me.openDepartureBoard(stop.id, stop.name);
-                            break;
-                        }
-                    }
-                } else if (me.detailPanel instanceof DepartureBoardPanel) {
-                    me.detailPanel.remove();
-                    delete me.detailPanel;
-                }
-            }
 
             // For development
             console.log(e.lngLat);
@@ -3484,33 +3454,6 @@ export default class extends Evented {
         }
         me.updateAdTrainPopup();
         map.triggerRepaint();
-    }
-
-    /**
-     * Opens the departure board for one GTFS stop. Union Station GO and
-     * Union Station Bus Terminal are separate boards (no aggregation).
-     * @param {string} stopId - GTFS stop ID
-     * @param {string} stopName - Stop name for the panel title
-     */
-    openDepartureBoard(stopId, stopName) {
-        const me = this;
-        let gtfsId;
-
-        for (const gtfs of me.gtfs.values()) {
-            if (gtfs.stops.get(stopId)) {
-                gtfsId = gtfs.id;
-                break;
-            }
-        }
-        if (!gtfsId) {
-            return;
-        }
-        if (me.detailPanel) {
-            me.detailPanel.remove();
-            delete me.detailPanel;
-        }
-        me.detailPanel = new DepartureBoardPanel({gtfsId, stopId, stopName});
-        me.detailPanel.addTo(me);
     }
 
     trackObject(object) {
