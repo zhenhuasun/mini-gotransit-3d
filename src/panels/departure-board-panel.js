@@ -1,7 +1,7 @@
 import {getTimeString} from '../helpers/helpers';
 import Panel from './panel';
 
-const WINDOW_SECONDS = 2 * 3600,
+const WINDOW_MS = 2 * 3600000,
     MAX_ROWS = 40,
     REFRESH_MS = 60000,
     WORKER_FALLBACK_ORIGIN = 'https://go-3d-tracker-proxy.zhenhuasun.workers.dev';
@@ -90,7 +90,8 @@ export default class extends Panel {
             stopCode = /^[A-Z]{2,4}$/.test(stopId) ? stopId : null;
         let nextRows = null,
             platformByTrip = new Map(),
-            unionRows = null;
+            unionRows = null,
+            apiFailed = false;
 
         // Primary: per-stop realtime predictions.
         if (stopCode) {
@@ -99,9 +100,12 @@ export default class extends Panel {
                 if (res.ok) {
                     const data = await res.json();
                     nextRows = Array.isArray(data.departures) ? data.departures : [];
+                } else {
+                    apiFailed = true;
                 }
             } catch (e) {
                 nextRows = null;
+                apiFailed = true;
             }
         }
 
@@ -181,9 +185,18 @@ export default class extends Panel {
         }
 
         if (!rows.length) {
-            // Fallback: GTFS static timetable for this stop.
+            // Fallback: GTFS static timetable for this stop. The note
+            // says why: an empty live response (e.g. overnight) is not
+            // an API failure, and a stop without an API code never
+            // attempted a live fetch at all.
             rows = me.computeStaticRows(gtfs, stopId);
-            sourceNote = 'Timetable (API unavailable)';
+            if (nextRows && !nextRows.length) {
+                sourceNote = 'No live departures right now · Timetable';
+            } else if (apiFailed) {
+                sourceNote = 'Timetable (API unavailable)';
+            } else {
+                sourceNote = 'Timetable (live data not available for this stop)';
+            }
         }
 
         rows = rows.slice(0, MAX_ROWS);
@@ -232,9 +245,14 @@ export default class extends Panel {
 
     // Static fallback: departures from this stop in the next 2 hours,
     // excluding terminating arrivals (last stop of a trip).
+    // Departure times are milliseconds since the last 3am (the
+    // getTimeOffset domain), NOT seconds since midnight — the
+    // previous version mixed those up and rendered every row 03:00.
     computeStaticRows(gtfs, stopId) {
-        const now = this._map.clock.getDate(),
-            nowSec = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds(),
+        const MS_DAY = 86400000,
+            now = this._map.clock.getDate(),
+            nowMs = (((now.getHours() + 21) % 24) * 60 + now.getMinutes()) * 60000 +
+                now.getSeconds() * 1000,
             rows = [];
 
         for (const trip of gtfs.trips.getAll()) {
@@ -249,10 +267,10 @@ export default class extends Panel {
                     continue;
                 }
                 const dep = departureTimes[i],
-                    depMod = ((dep % 86400) + 86400) % 86400,
-                    key = depMod >= nowSec ? depMod : depMod + 86400;
+                    depMod = ((dep % MS_DAY) + MS_DAY) % MS_DAY,
+                    key = depMod >= nowMs ? depMod : depMod + MS_DAY;
 
-                if (key >= nowSec && key < nowSec + WINDOW_SECONDS) {
+                if (key >= nowMs && key < nowMs + WINDOW_MS) {
                     const rawHeadsign = headsigns.length > 1 ? headsigns[i] : headsigns[0];
                     rows.push({
                         key,
