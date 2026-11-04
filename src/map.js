@@ -1359,6 +1359,13 @@ export default class extends Evented {
             console.log(e.lngLat);
         });
 
+        // Keep station discs visible when zoomed out (see
+        // updateStationMarkerScale). Separate from the zoom handler
+        // below, which manages the layer-zoom buckets.
+        map.on('zoom', () => {
+            me.updateStationMarkerScale();
+        });
+
         map.on('zoom', e => {
             if (!e.tracking) {
                 me.updateBaseZoom();
@@ -2867,35 +2874,88 @@ export default class extends Evented {
                     }
                 }
 
-                // 3D station markers replace the flat circles: real
-                // columns rising from the ground, rail stations taller
-                // and GO green, bus stops shorter and grey. Added before
+                // 3D station markers replace the flat circles: glowing
+                // discs lying almost flat on the ground — a solid disc
+                // plus a wider translucent halo in the same color.
+                // Rail discs are 4m tall, bus discs 2m, both well under
+                // two storeys. Rail stations take their line's route
+                // color (counted from the trips stopping there, so a
+                // station's color is its dominant line's color; every
+                // rail station serves one line except Union, which is
+                // black); bus stops stay grey. All discs are
+                // transparent so the map shows through. Added before
                 // the label layer so labels draw on top. A letter stop
                 // id other than PA is a rail station; numeric ids are
                 // bus stops.
-                for (const [key, radius, elevation, color] of [
-                    ['rail', 15, 40, [0, 166, 81, 255]],
-                    ['bus', 8, 20, [158, 158, 158, 255]]
-                ]) {
-                    const isRail = key === 'rail',
+                const stopRouteVotes = new Map();
+
+                for (const trip of me.gtfs.get(id).trips.getAll()) {
+                    const route = me.gtfs.get(id).routes.get(trip.route),
+                        color = route && route.color;
+
+                    if (!color) {
+                        continue;
+                    }
+                    for (const stopId of trip.stops) {
+                        let votes = stopRouteVotes.get(stopId);
+
+                        if (!votes) {
+                            votes = stopRouteVotes.set(stopId, new Map()).get(stopId);
+                        }
+                        votes.set(color, (votes.get(color) || 0) + 1);
+                    }
+                }
+
+                for (const [key, radius, elevation, isHalo] of STATION_MARKER_LAYERS) {
+                    const isRail = key.startsWith('rail'),
                         markerData = [];
 
                     for (const stop of me.gtfs.get(id).stops.getAll()) {
-                        if ((/^[A-Za-z]+$/.test(stop.id) && stop.id !== 'PA') === isRail) {
-                            markerData.push({id: stop.id, name: stop.name, position: stop.coord});
+                        const stopIsRail = /^[A-Za-z]+$/.test(stop.id) && stop.id !== 'PA';
+
+                        if (stopIsRail !== isRail) {
+                            continue;
                         }
+                        let rgb;
+
+                        if (isRail) {
+                            if (stop.id === 'UN') {
+                                rgb = [0, 0, 0];
+                            } else {
+                                const votes = stopRouteVotes.get(stop.id);
+                                let bestColor, bestCount = 0;
+
+                                if (votes) {
+                                    for (const [color, count] of votes) {
+                                        if (count > bestCount) {
+                                            bestCount = count;
+                                            bestColor = color;
+                                        }
+                                    }
+                                }
+                                rgb = bestColor ? helpers.colorToRGBArray(bestColor) : [0, 166, 81];
+                            }
+                        } else {
+                            rgb = [158, 158, 158];
+                        }
+                        markerData.push({
+                            id: stop.id,
+                            name: stop.name,
+                            position: stop.coord,
+                            color: [...rgb, isHalo ? 64 : 179]
+                        });
                     }
                     map.addLayer(new MapboxLayer({
                         id: `go-station-markers-${key}-${id}`,
                         type: ColumnLayer,
                         data: markerData,
-                        pickable: true,
+                        pickable: !isHalo,
                         extruded: true,
                         diskResolution: 24,
-                        radius,
+                        radius: radius * getStationMarkerZoomFactor(map.getZoom()),
                         getPosition: d => d.position,
                         getElevation: elevation,
-                        getFillColor: color
+                        getFillColor: d => d.color
                     }), 'poi');
                     layerIds.add(`go-station-markers-${key}-${id}`);
                 }
@@ -3727,6 +3787,24 @@ export default class extends Evented {
             ambient: helpersMapbox.getAmbientLight(map),
             brightness: helpersMapbox.getBrightness(map)
         };
+    }
+
+    // Rescales the station discs with zoom (see
+    // getStationMarkerZoomFactor) so they stay visible when zoomed
+    // out. Deck layer props update in place, no re-add, no flicker.
+    updateStationMarkerScale() {
+        const me = this,
+            factor = getStationMarkerZoomFactor(me.map.getZoom());
+
+        for (const {id} of me.gtfs.values()) {
+            for (const [key, radius] of STATION_MARKER_LAYERS) {
+                const layer = me.map.getLayer(`go-station-markers-${key}-${id}`);
+
+                if (layer) {
+                    layer.setProps({radius: radius * factor});
+                }
+            }
+        }
     }
 
     // Picks a 3D station marker (deck ColumnLayer) at the given point,
@@ -4642,6 +4720,25 @@ function createInterpolant(xs, ys) {
         const diff = x - xs[i], diffSq = diff * diff;
         return ys[i] + c1s[i] * diff + c2s[i] * diffSq + c3s[i] * diff * diffSq;
     };
+}
+
+// 3D station marker discs: [layer key, base radius (m), height (m), halo?]
+// The main disc is solid-ish; the halo disc is wider, flatter and more
+// transparent, which reads as a glow around the base.
+const STATION_MARKER_LAYERS = [
+    ['rail', 20, 4, false],
+    ['rail-halo', 40, 0.5, true],
+    ['bus', 12, 2, false],
+    ['bus-halo', 24, 0.5, true]
+];
+
+// Zoom compensation for station discs: fixed world meters shrink to
+// nothing when zoomed out, so the radius grows as zoom drops to keep
+// the on-screen size roughly constant (capped so the region view does
+// not blob out). Elevation stays fixed — discs get flatter-looking
+// as you zoom out, never taller.
+function getStationMarkerZoomFactor(zoom) {
+    return Math.min(32, Math.pow(2, Math.max(0, 15 - zoom)));
 }
 
 function getLayerZoom(zoom) {
