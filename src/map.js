@@ -1238,6 +1238,9 @@ export default class extends Evented {
 
                 me.markObject(object);
                 me.trackObject(object);
+                if (!object) {
+                    me.handleEmptyTap(e.point);
+                }
                 tapSuppressUntil = performance.now() + TAP_SUPPRESS_DURATION;
                 tapStartPoint = undefined;
             }
@@ -3790,6 +3793,66 @@ export default class extends Evented {
      * @param {string} stopId - GTFS stop ID
      * @param {string} stopName - Stop name for the panel title
      */
+    // Shared station-tap logic for touch devices. The click handler
+    // has the same logic inline; the touchend handler must run it too,
+    // because it suppresses the synthetic click that would otherwise
+    // have done this — without it, tapping a station on a phone does
+    // nothing. (Unify the two copies on the next touch of either.)
+    handleEmptyTap(point) {
+        const me = this,
+            map = me.map,
+            stationLayers = [];
+
+        for (const {id} of me.gtfs.values()) {
+            stationLayers.push(`busstops-poi-${id}`, `busstops-circle-rail-${id}`, `busstops-circle-bus-${id}`);
+        }
+        const hits = stationLayers.length ?
+            map.queryRenderedFeatures(point, {layers: stationLayers}) : [];
+
+        if (hits.length) {
+            const hit = hits[0],
+                coords = hit.geometry && hit.geometry.coordinates;
+            let best = null,
+                bestDist = Infinity;
+
+            // Prefer the nearest stop to the tapped label: bus stops
+            // often share a name across directions, so a name lookup
+            // alone can open the wrong side of the street.
+            if (coords) {
+                for (const gtfs of me.gtfs.values()) {
+                    for (const stop of gtfs.stops.getAll()) {
+                        const dLng = stop.coord[0] - coords[0],
+                            dLat = stop.coord[1] - coords[1],
+                            dist = dLng * dLng + dLat * dLat;
+
+                        if (dist < bestDist) {
+                            bestDist = dist;
+                            best = stop;
+                        }
+                    }
+                }
+            }
+            if (!best) {
+                const hitName = hit.properties.name;
+
+                for (const gtfs of me.gtfs.values()) {
+                    const stop = gtfs.stops.getAll().find(s => s.name === hitName);
+
+                    if (stop) {
+                        best = stop;
+                        break;
+                    }
+                }
+            }
+            if (best) {
+                me.openDepartureBoard(best.id, best.name);
+            }
+        } else if (me.detailPanel instanceof DepartureBoardPanel) {
+            me.detailPanel.remove();
+            delete me.detailPanel;
+        }
+    }
+
     openDepartureBoard(stopId, stopName) {
         const me = this;
         let gtfsId;
