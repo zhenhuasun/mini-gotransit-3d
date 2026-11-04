@@ -1,5 +1,7 @@
 import {featureEach} from '@turf/meta';
 import {Evented, FullscreenControl, LngLat, Map as Mapbox, MercatorCoordinate, NavigationControl} from 'mapbox-gl';
+import {ColumnLayer} from '@deck.gl/layers';
+import {MapboxLayer} from '@deck.gl/mapbox';
 import AnimatedPopup from 'mapbox-gl-animated-popup';
 import ActiveObjectLookup from './active-object-lookup';
 import animation from './animation';
@@ -1234,12 +1236,19 @@ export default class extends Evented {
 
         map.on('touchend', e => {
             if (tapStartPoint) {
-                const object = me.pickObject(e.point);
+                const marker = me.pickStationMarker(e.point);
 
-                me.markObject(object);
-                me.trackObject(object);
-                if (!object) {
-                    me.handleEmptyTap(e.point);
+                if (marker) {
+                    me.markObject();
+                    me.openDepartureBoard(marker.id, marker.name);
+                } else {
+                    const object = me.pickObject(e.point);
+
+                    me.markObject(object);
+                    me.trackObject(object);
+                    if (!object) {
+                        me.handleEmptyTap(e.point);
+                    }
                 }
                 tapSuppressUntil = performance.now() + TAP_SUPPRESS_DURATION;
                 tapStartPoint = undefined;
@@ -1253,11 +1262,11 @@ export default class extends Evented {
             const object = me.pickObject(e.point);
             me.markObject(object);
             if (!object) {
-                // Pointer cursor over station circles (labels and
-                // circles share the layers queried on click).
+                // Pointer cursor over station labels (labels share the
+                // layers queried on click).
                 const stationLayers = [];
                 for (const {id} of me.gtfs.values()) {
-                    stationLayers.push(`busstops-circle-rail-${id}`, `busstops-circle-bus-${id}`);
+                    stationLayers.push(`busstops-poi-${id}`);
                 }
                 const hits = stationLayers.length ?
                     map.queryRenderedFeatures(e.point, {layers: stationLayers}) : [];
@@ -1277,6 +1286,14 @@ export default class extends Evented {
                 return;
             }
 
+            const marker = me.pickStationMarker(e.point);
+
+            if (marker) {
+                me.markObject();
+                me.openDepartureBoard(marker.id, marker.name);
+                return;
+            }
+
             const object = me.pickObject(e.point);
 
             me.markObject(object);
@@ -1289,7 +1306,7 @@ export default class extends Evented {
                 const stationLayers = [];
 
                 for (const {id} of me.gtfs.values()) {
-                    stationLayers.push(`busstops-poi-${id}`, `busstops-circle-rail-${id}`, `busstops-circle-bus-${id}`);
+                    stationLayers.push(`busstops-poi-${id}`);
                 }
                 const hits = stationLayers.length ?
                     map.queryRenderedFeatures(e.point, {layers: stationLayers}) : [];
@@ -2850,29 +2867,37 @@ export default class extends Evented {
                     }
                 }
 
-                // Station circles, visible at every zoom: rail stations
-                // always 2.5px larger than bus stops (constant gap, so
-                // the ordering holds at every zoom, clamped ends incl.).
-                // Added before the label layer so labels draw on top.
-                for (const [key, radius] of [
-                    ['rail', ['interpolate', ['linear'], ['zoom'], 5, 4.5, 10, 5.5, 16, 7.5]],
-                    ['bus', ['interpolate', ['linear'], ['zoom'], 5, 2, 10, 3, 16, 5]]
+                // 3D station markers replace the flat circles: real
+                // columns rising from the ground, rail stations taller
+                // and GO green, bus stops shorter and grey. Added before
+                // the label layer so labels draw on top. A letter stop
+                // id other than PA is a rail station; numeric ids are
+                // bus stops.
+                for (const [key, radius, elevation, color] of [
+                    ['rail', 15, 40, [0, 166, 81, 255]],
+                    ['bus', 8, 20, [158, 158, 158, 255]]
                 ]) {
-                    me.addLayer({
-                        id: `busstops-circle-${key}-${id}`,
-                        type: 'circle',
-                        source: id,
-                        filter: ['all', ['==', ['get', 'type'], 2], ['==', ['get', 'rail'], key === 'rail' ? 1 : 0]],
-                        paint: {
-                            'circle-color': '#ffffff',
-                            'circle-opacity': 0.85,
-                            'circle-radius': radius,
-                            'circle-stroke-color': '#333333',
-                            'circle-stroke-opacity': 0.9,
-                            'circle-stroke-width': 1
+                    const isRail = key === 'rail',
+                        markerData = [];
+
+                    for (const stop of me.gtfs.get(id).stops.getAll()) {
+                        if ((/^[A-Za-z]+$/.test(stop.id) && stop.id !== 'PA') === isRail) {
+                            markerData.push({id: stop.id, name: stop.name, position: stop.coord});
                         }
-                    });
-                    layerIds.add(`busstops-circle-${key}-${id}`);
+                    }
+                    map.addLayer(new MapboxLayer({
+                        id: `go-station-markers-${key}-${id}`,
+                        type: ColumnLayer,
+                        data: markerData,
+                        pickable: true,
+                        extruded: true,
+                        diskResolution: 24,
+                        radius,
+                        getPosition: d => d.position,
+                        getElevation: elevation,
+                        getFillColor: color
+                    }), 'poi');
+                    layerIds.add(`go-station-markers-${key}-${id}`);
                 }
 
                 me.addLayer({
@@ -3704,6 +3729,25 @@ export default class extends Evented {
         };
     }
 
+    // Picks a 3D station marker (deck ColumnLayer) at the given point,
+    // across all loaded GTFS datasets. Returns the stop data object
+    // ({id, name, position}) or undefined. Checked before vehicle
+    // picking in the click/tap handlers so a pillar tap opens its
+    // board instead of falling through to vehicle/label handling.
+    pickStationMarker(point) {
+        const me = this;
+
+        for (const {id} of me.gtfs.values()) {
+            for (const key of ['rail', 'bus']) {
+                const marker = pickObject(me.map.__deck, `go-station-markers-${key}-${id}`, point);
+
+                if (marker) {
+                    return marker;
+                }
+            }
+        }
+    }
+
     pickObject(point) {
         const me = this,
             {map, layerZoom} = me,
@@ -3804,7 +3848,7 @@ export default class extends Evented {
             stationLayers = [];
 
         for (const {id} of me.gtfs.values()) {
-            stationLayers.push(`busstops-poi-${id}`, `busstops-circle-rail-${id}`, `busstops-circle-bus-${id}`);
+            stationLayers.push(`busstops-poi-${id}`);
         }
         const hits = stationLayers.length ?
             map.queryRenderedFeatures(point, {layers: stationLayers}) : [];
