@@ -18,7 +18,7 @@ import * as helpersMapbox from './helpers/helpers-mapbox';
 import * as helpersWebgl from './helpers/helpers-webgl';
 import {GeoJsonLayer, GlowCompositeLayer, RailwayStatusGlowLayer, STROKE_WIDTH_SCALE_STOPS, StationGlowLayer, ThreeLayer, Tile3DLayer, TrafficLayer, ZoomWidthScaleExtension} from './layers';
 import {isExpired, loadBusData, loadDictionary, loadDynamicBusData, loadDynamicFlightData, loadDynamicTrainData, loadStaticData, loadTimetableData, updateOdptUrl} from './loader';
-import {AboutPanel, BusPanel, DepartureBoardPanel, LayerPanel, SharePanel, StationPanel, TrackingModePanel, TrainPanel} from './panels';
+import {AboutPanel, BusPanel, DelayDashboardPanel, DepartureBoardPanel, LayerPanel, SharePanel, StationPanel, TrackingModePanel, TrainPanel} from './panels';
 import Plugin from './plugin';
 import nearestCloserPointOnLine from './turf/nearest-closer-point-on-line';
 
@@ -1170,6 +1170,14 @@ export default class extends Evented {
 
             map.addControl(control);
         }
+
+        map.addControl(new MapboxGLButtonControl([{
+            className: 'mapboxgl-ctrl-delay-dashboard',
+            title: 'Delay dashboard',
+            eventHandler() {
+                me.toggleDelayDashboard();
+            }
+        }]));
 
         me.layerPanel = new LayerPanel({layers: me.plugins});
         me.trackingModePanel = new TrackingModePanel();
@@ -3972,6 +3980,52 @@ export default class extends Evented {
         } else if (me.detailPanel instanceof DepartureBoardPanel) {
             me.detailPanel.remove();
             delete me.detailPanel;
+        }
+    }
+
+    toggleDelayDashboard() {
+        const me = this;
+
+        if (me.delayDashboardPanel && me.delayDashboardPanel.isOpen()) {
+            me.delayDashboardPanel.remove();
+            delete me.delayDashboardPanel;
+        } else {
+            if (me.detailPanel) {
+                me.detailPanel.remove();
+                delete me.detailPanel;
+            }
+            me.delayDashboardPanel = new DelayDashboardPanel();
+            me.delayDashboardPanel.addTo(me);
+        }
+    }
+
+    // Highlights the given delay-dashboard vehicles: a white marker
+    // above each one plus a bold line for each of their routes. Call
+    // with null or [] to clear. The dashboard owns the route-highlight
+    // state exclusively (updateBusRouteHighlight has no other caller),
+    // so clearing restores every route.
+    highlightDelayVehicles(vehicles) {
+        const me = this,
+            {trafficLayer} = me;
+
+        if (me._delayHighlightVehicles) {
+            for (const bus of me._delayHighlightVehicles) {
+                trafficLayer.setObjectHighlight(bus, false);
+            }
+            delete me._delayHighlightVehicles;
+        }
+        me.updateBusRouteHighlight();
+        if (vehicles && vehicles.length) {
+            const routes = new Map();
+
+            me._delayHighlightVehicles = vehicles;
+            for (const bus of vehicles) {
+                trafficLayer.setObjectHighlight(bus, true);
+                routes.set(`${bus.gtfsId}.${bus.trip.route}`, bus);
+            }
+            for (const bus of routes.values()) {
+                me.updateBusRouteHighlight(bus.gtfsId, bus.trip.route);
+            }
         }
     }
 

@@ -106,15 +106,19 @@ export default class {
         // Delay marker spheres: Tokyo trains (CAR) keep a single orange
         // marker; GO vehicles (BUS) get yellow (3-14 min late) and red
         // (15+ min late) markers driven by TripUpdates delay levels.
+        // The highlight marker is a larger white shell around the
+        // vehicle (same sphere, wider radius) so it reads as a glow
+        // ring over the delay sphere instead of covering it.
         const delayMarkerColors = type === 'CAR' ? [
-            ['delayMarker', [1.0, 0.6, 0.0]]
+            ['delayMarker', [1.0, 0.6, 0.0], 1.8]
         ] : type === 'BUS' ? [
-            ['delayMarkerYellow', [1.0, 0.85, 0.0]],
-            ['delayMarkerRed', [0.95, 0.15, 0.15]]
+            ['delayMarkerYellow', [1.0, 0.85, 0.0], 1.8],
+            ['delayMarkerRed', [0.95, 0.15, 0.15], 1.8],
+            ['highlightMarker', [1.0, 1.0, 1.0], 2.6]
         ] : [];
 
-        for (const [key, color] of delayMarkerColors) {
-            const sphereGeometry = new SphereGeometry(1.8, 32, 32);
+        for (const [key, color, radius] of delayMarkerColors) {
+            const sphereGeometry = new SphereGeometry(radius, 32, 32);
             const geometry = me[`${key}Geometry`] = new InstancedGeometry(sphereGeometry, count);
             const material = me[`${key}Material`] = new ShaderMaterial({
                 uniforms: Object.assign({}, uniforms, {
@@ -163,6 +167,10 @@ export default class {
         return this.delayMarkerRedMesh;
     }
 
+    getHighlightMarkerMesh() {
+        return this.highlightMarkerMesh;
+    }
+
     refreshCameraParams(params) {
         const uniforms = this.uniforms;
 
@@ -196,6 +204,9 @@ export default class {
         if (me.delayMarkerRedGeometry) {
             me.delayMarkerRedGeometry.setInstanceIDs(ids.delayMarkerRed);
         }
+        if (me.highlightMarkerGeometry) {
+            me.highlightMarkerGeometry.setInstanceIDs(ids.highlightMarker);
+        }
     }
 
     setMarkedInstanceID(id) {
@@ -215,7 +226,7 @@ export default class {
         if (delayMarkerMesh) {
             delayMarkerMesh.material.blending = dark ? AdditiveBlending : MultiplyBlending;
         }
-        for (const key of ['delayMarkerYellow', 'delayMarkerRed']) {
+        for (const key of ['delayMarkerYellow', 'delayMarkerRed', 'highlightMarker']) {
             const material = this[`${key}Material`],
                 mesh = this[`${key}Mesh`];
             if (material) {
@@ -242,7 +253,7 @@ export default class {
         if (delayMarkerMaterial) {
             delayMarkerMaterial.dispose();
         }
-        for (const key of ['delayMarkerYellow', 'delayMarkerRed']) {
+        for (const key of ['delayMarkerYellow', 'delayMarkerRed', 'highlightMarker']) {
             const geometry = me[`${key}Geometry`],
                 material = me[`${key}Material`];
             if (geometry) {

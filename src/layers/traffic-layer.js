@@ -63,6 +63,7 @@ export default class {
         scene.add(ogCarMeshSet.getDelayMarkerMesh());
         scene.add(busMeshSet.getDelayMarkerYellowMesh());
         scene.add(busMeshSet.getDelayMarkerRedMesh());
+        scene.add(busMeshSet.getHighlightMarkerMesh());
 
         me.glowPipeline.add(ugCarMeshSet.getOutlineMesh());
         me.glowPipeline.add(ogCarMeshSet.getOutlineMesh());
@@ -403,6 +404,15 @@ export default class {
 
         if (object.instanceID !== undefined) {
             me.computeRenderer.updateInstanceDelay(object.instanceID, delay);
+            me.needsUpdateInstances = true;
+        }
+    }
+
+    setObjectHighlight(object, highlighted) {
+        const me = this;
+
+        if (object.instanceID !== undefined) {
+            me.computeRenderer.updateInstanceHighlight(object.instanceID, highlighted);
             me.needsUpdateInstances = true;
         }
     }

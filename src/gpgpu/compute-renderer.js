@@ -151,6 +151,10 @@ export default class {
         this.dtObject.updateDelay(instanceID, delay);
     }
 
+    updateInstanceHighlight(instanceID, highlighted) {
+        this.dtObject.updateHighlight(instanceID, highlighted);
+    }
+
     removeInstance(instanceID) {
         return this.dtObject.remove(instanceID);
     }

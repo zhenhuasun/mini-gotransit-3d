@@ -73,9 +73,21 @@ export default class {
 
     updateDelay(instanceID, delay) {
         const me = this,
-            uintArray = me.uintTexture.image.data;
+            uintArray = me.uintTexture.image.data,
+            offset = instanceID * 8 + 7;
 
-        uintArray[instanceID * 8 + 7] = delay;
+        // The highlight flag lives in bit 2 of the same value; a delay
+        // update must not clear a highlight (and vice versa).
+        uintArray[offset] = delay | (uintArray[offset] & 4);
+        me.uintTexture.needsUpdate = true;
+    }
+
+    updateHighlight(instanceID, highlighted) {
+        const me = this,
+            uintArray = me.uintTexture.image.data,
+            offset = instanceID * 8 + 7;
+
+        uintArray[offset] = (uintArray[offset] & 3) | (highlighted ? 4 : 0);
         me.uintTexture.needsUpdate = true;
     }
 
@@ -115,7 +127,7 @@ export default class {
             ugCarIDs = {body: [], delayMarker: [], outline: []},
             ogCarIDs = {body: [], delayMarker: [], outline: []},
             aircraftIDs = {body: [], outline: []},
-            busIDs = {body: [], delayMarkerYellow: [], delayMarkerRed: [], outline: []};
+            busIDs = {body: [], delayMarkerYellow: [], delayMarkerRed: [], highlightMarker: [], outline: []};
 
         for (let i = 0, ilen = me.count; i < ilen; i++) {
             const offset = i * 8,
@@ -123,7 +135,8 @@ export default class {
 
             if (fadeAnimationType !== 0) {
                 const objectType = uintArray[offset],
-                    delay = uintArray[offset + 7],
+                    value = uintArray[offset + 7],
+                    delay = value & 3,
                     z = bufferArray[i * 4 + 2],
                     ids = objectType === 0 ? z < 0 ? ugCarIDs : ogCarIDs : objectType === 1 ? aircraftIDs : busIDs;
 
@@ -136,6 +149,9 @@ export default class {
                     }
                 } else if (delay === 2 && ids.delayMarkerRed) {
                     ids.delayMarkerRed.push(i);
+                }
+                if ((value & 4) !== 0 && ids.highlightMarker) {
+                    ids.highlightMarker.push(i);
                 }
                 if (i === me.marked || i === me.tracked) {
                     ids.outline.push(i);

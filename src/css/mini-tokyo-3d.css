@@ -443,6 +443,72 @@
     padding: 0 10px;
     overflow: hidden;
 }
+.mini-tokyo-3d .delay-dashboard-panel {
+    max-width: 680px;
+}
+.mini-tokyo-3d .delay-toggles {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 10px;
+}
+.mini-tokyo-3d .delay-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 9px;
+    border: 1px solid rgba(255, 255, 255, 0.4);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+    font-size: 13px;
+    cursor: pointer;
+}
+.mini-tokyo-3d .delay-chip.off {
+    opacity: 0.45;
+}
+.mini-tokyo-3d .delay-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+}
+.mini-tokyo-3d .delay-chart-wrap {
+    position: relative;
+}
+.mini-tokyo-3d .delay-tooltip {
+    position: absolute;
+    z-index: 5;
+    min-width: 130px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.85);
+    color: #fff;
+    font-size: 13px;
+    pointer-events: none;
+}
+.mini-tokyo-3d .delay-breakdown-title {
+    margin-bottom: 6px;
+    font-weight: bold;
+}
+.mini-tokyo-3d .delay-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    line-height: 1.6;
+}
+.mini-tokyo-3d .delay-count {
+    margin-left: auto;
+    font-weight: bold;
+}
+.mini-tokyo-3d .delay-detail {
+    margin-top: 10px;
+    font-size: 14px;
+}
+.mini-tokyo-3d .delay-footnote {
+    margin-top: 8px;
+    color: #cccccc;
+    font-size: 12px;
+}
 .mini-tokyo-3d .windows {
     scrollbar-width: thin;
     scrollbar-color: #ccc transparent;
@@ -1003,6 +1069,9 @@
 }
 .mini-tokyo-3d .mapboxgl-ctrl button.mapboxgl-ctrl-layers .mapboxgl-ctrl-icon {
     background: no-repeat center/21px svg-load('../../node_modules/@fortawesome/fontawesome-free/svgs/solid/layer-group.svg', fill: #333);
+}
+.mini-tokyo-3d .mapboxgl-ctrl button.mapboxgl-ctrl-delay-dashboard .mapboxgl-ctrl-icon {
+    background: no-repeat center/21px svg-load('../../node_modules/@fortawesome/fontawesome-free/svgs/solid/chart-column.svg', fill: #333);
 }
 .mini-tokyo-3d .mapboxgl-ctrl button.mapboxgl-ctrl-tracking-mode .mapboxgl-ctrl-icon {
     background: no-repeat center/19px svg-load('../../node_modules/@fortawesome/fontawesome-free/svgs/solid/video.svg', fill: #333);
