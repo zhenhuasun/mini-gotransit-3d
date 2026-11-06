@@ -614,6 +614,9 @@
 .mini-tokyo-3d .busstop-row:hover {
     background-color: rgba(102, 102, 102, 0.7);
 }
+.mini-tokyo-3d .busstop-row.passed {
+    color: #9e9e9e;
+}
 .mini-tokyo-3d .busstop-row > div {
     display: table-cell;
     vertical-align: middle;
