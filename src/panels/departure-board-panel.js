@@ -217,7 +217,8 @@ export default class extends Panel {
             `${sourceNote} · ${rows.length} departures`,
             '</div>',
             '<div style="display:flex;align-items:center;gap:8px;padding:4px 12px;opacity:.6;font-size:12px">',
-            '<span style="flex:1">Line · Destination</span>',
+            '<span style="flex:none;width:34px;text-align:left">Line</span>',
+            '<span style="flex:1;text-align:left">Destination</span>',
             '<span style="min-width:52px;text-align:right">Scheduled</span>',
             '<span style="min-width:64px;text-align:right">Expected</span>',
             '<span style="min-width:40px;text-align:right">Platform</span>',
@@ -240,8 +241,8 @@ export default class extends Panel {
                 }
                 return [
                     '<div style="display:flex;align-items:center;gap:8px;padding:6px 12px;border-bottom:1px solid rgba(0,0,0,.06)">',
-                    `<span style="display:inline-block;background:${row.color || '#666'};color:${row.textColor || '#fff'};padding:2px 8px;border-radius:10px;font-weight:bold">${row.line}</span>`,
-                    `<span style="flex:1">${row.destination}</span>`,
+                    `<span style="flex:none;width:34px;padding:2px 0;text-align:center;background:${row.color || '#666'};color:${row.textColor || '#fff'};border-radius:10px;font-weight:bold">${row.line}</span>`,
+                    `<span style="flex:1;text-align:left">${row.destination}</span>`,
                     `<span style="min-width:52px;text-align:right">${row.scheduled || '—'}</span>`,
                     `<span style="min-width:64px;text-align:right">${expectedHTML}</span>`,
                     `<span style="min-width:40px;text-align:right">${row.platform || '—'}</span>`,
