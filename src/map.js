@@ -1269,16 +1269,20 @@ export default class extends Evented {
             }
             const object = me.pickObject(e.point);
             me.markObject(object);
-            if (!object) {
-                // Pointer cursor over station labels (labels share the
-                // layers queried on click).
-                const stationLayers = [];
-                for (const {id} of me.gtfs.values()) {
-                    stationLayers.push(`busstops-poi-${id}`);
-                }
-                const hits = stationLayers.length ?
-                    map.queryRenderedFeatures(e.point, {layers: stationLayers}) : [];
-                map.getCanvas().style.cursor = hits.length ? 'pointer' : '';
+            if (object) {
+                // A vehicle takes precedence over the station card.
+                me.hideStationHover();
+                return;
+            }
+            // Station hover card: a 3D disc or a station label under the
+            // pointer shows the station name and its routes.
+            const station = me.pickStation(e.point);
+            if (station) {
+                map.getCanvas().style.cursor = 'pointer';
+                me.showStationHover(station);
+            } else {
+                map.getCanvas().style.cursor = '';
+                me.hideStationHover();
             }
         });
 
@@ -1287,6 +1291,7 @@ export default class extends Evented {
                 return;
             }
             me.markObject();
+            me.hideStationHover();
         });
 
         map.on('click', e => {
@@ -1360,6 +1365,7 @@ export default class extends Evented {
                 } else if (me.detailPanel instanceof DepartureBoardPanel) {
                     me.detailPanel.remove();
                     delete me.detailPanel;
+                    me.hideStationHover();
                 }
             }
 
@@ -2656,6 +2662,8 @@ export default class extends Evented {
                     promises.push(me.stopBus(bus));
                 }
                 me.gtfs.delete(id);
+                delete me._stationRoutes;
+                me.hideStationHover();
                 return Promise.all(promises).then(() => {
                     me.trafficLayer.removeRouteGroup(routeGroupIndex);
                     me.trafficLayer.removeColorGroup(colorGroupIndex);
@@ -3834,6 +3842,173 @@ export default class extends Evented {
         }
     }
 
+    // Finds the stop under a point: a 3D station disc first, then the
+    // nearest stop to a station label (same rule as click/tap).
+    pickStation(point) {
+        const me = this,
+            map = me.map,
+            marker = me.pickStationMarker(point);
+
+        if (marker) {
+            for (const gtfs of me.gtfs.values()) {
+                const stop = gtfs.stops.get(marker.id);
+
+                if (stop) {
+                    return stop;
+                }
+            }
+        }
+        const stationLayers = [];
+
+        for (const {id} of me.gtfs.values()) {
+            stationLayers.push(`busstops-poi-${id}`);
+        }
+        const hits = stationLayers.length ?
+            map.queryRenderedFeatures(point, {layers: stationLayers}) : [];
+
+        if (!hits.length) {
+            return null;
+        }
+        const hit = hits[0],
+            coords = hit.geometry && hit.geometry.coordinates;
+        let best = null,
+            bestDist = Infinity;
+
+        if (coords) {
+            for (const gtfs of me.gtfs.values()) {
+                for (const stop of gtfs.stops.getAll()) {
+                    const dLng = stop.coord[0] - coords[0],
+                        dLat = stop.coord[1] - coords[1],
+                        dist = dLng * dLng + dLat * dLat;
+
+                    if (dist < bestDist) {
+                        bestDist = dist;
+                        best = stop;
+                    }
+                }
+            }
+        }
+        if (!best) {
+            const hitName = hit.properties.name;
+
+            for (const gtfs of me.gtfs.values()) {
+                const stop = gtfs.stops.getAll().find(s => s.name === hitName);
+
+                if (stop) {
+                    best = stop;
+                    break;
+                }
+            }
+        }
+        return best;
+    }
+
+    // Routes serving a stop, from the trips in the current feed. The
+    // full stop-to-routes index is built once on first use and cached;
+    // it is dropped when a dataset is removed.
+    getStationRoutes(stopId) {
+        const me = this;
+
+        if (!me._stationRoutes) {
+            const index = me._stationRoutes = new Map();
+
+            for (const gtfs of me.gtfs.values()) {
+                for (const trip of gtfs.trips.getAll()) {
+                    const route = gtfs.routes.get(trip.route);
+
+                    if (!route) {
+                        continue;
+                    }
+                    for (const sid of trip.stops) {
+                        let set = index.get(sid);
+
+                        if (!set) {
+                            set = new Set();
+                            index.set(sid, set);
+                        }
+                        set.add(route);
+                    }
+                }
+            }
+        }
+        const routes = [...(me._stationRoutes.get(stopId) || [])],
+            corridorOrder = ['BR', 'KI', 'LE', 'LW', 'MI', 'RH', 'ST'];
+
+        // Trains first in corridor order, then buses by route number.
+        routes.sort((a, b) => {
+            const aTrain = a.type === 2,
+                bTrain = b.type === 2;
+
+            if (aTrain !== bTrain) {
+                return aTrain ? -1 : 1;
+            }
+            if (aTrain) {
+                return corridorOrder.indexOf(a.shortName) - corridorOrder.indexOf(b.shortName);
+            }
+            const aNum = parseInt(a.shortName, 10),
+                bNum = parseInt(b.shortName, 10);
+
+            if (!isNaN(aNum) && !isNaN(bNum)) {
+                return aNum - bNum;
+            }
+            return a.shortName < b.shortName ? -1 : a.shortName > b.shortName ? 1 : 0;
+        });
+        return routes;
+    }
+
+    getStationDescription(stop) {
+        const me = this,
+            rows = me.getStationRoutes(stop.id).map(route => [
+                '<div class="station-route-row">',
+                `<span class="station-route-block" style="background-color: ${route.color || '#666'};color: ${route.textColor || '#fff'}">${route.shortName}</span>`,
+                `<span class="station-route-name">${route.longName}</span>`,
+                '</div>'
+            ].join(''));
+
+        return [
+            `<div class="station-hover-name">${stop.name}</div>`,
+            ...rows
+        ].join('');
+    }
+
+    showStationHover(stop) {
+        const me = this;
+
+        if (me._stationHoverStopId === stop.id && me.stationPopup) {
+            return;
+        }
+        me.hideStationHover();
+        const popup = me.stationPopup = new AnimatedPopup({
+            className: helpers.isTouchDevice() ? 'popup-station popup-touch' : 'popup-station',
+            closeButton: false,
+            closeOnClick: false,
+            maxWidth: '90vw',
+            offset: {
+                top: [0, 10],
+                bottom: [0, -30]
+            },
+            openingAnimation: {
+                duration: 300,
+                easing: 'easeOutBack'
+            }
+        });
+
+        me._stationHoverStopId = stop.id;
+        popup.setLngLat(stop.coord)
+            .setHTML(me.getStationDescription(stop))
+            .addTo(me.map);
+    }
+
+    hideStationHover() {
+        const me = this;
+
+        if (me.stationPopup) {
+            me.stationPopup.remove();
+            delete me.stationPopup;
+        }
+        delete me._stationHoverStopId;
+    }
+
     pickObject(point) {
         const me = this,
             {map, layerZoom} = me,
@@ -3980,6 +4155,7 @@ export default class extends Evented {
         } else if (me.detailPanel instanceof DepartureBoardPanel) {
             me.detailPanel.remove();
             delete me.detailPanel;
+            me.hideStationHover();
         }
     }
 
@@ -3993,6 +4169,7 @@ export default class extends Evented {
             if (me.detailPanel) {
                 me.detailPanel.remove();
                 delete me.detailPanel;
+                me.hideStationHover();
             }
             me.delayDashboardPanel = new DelayDashboardPanel();
             me.delayDashboardPanel.addTo(me);
@@ -4048,6 +4225,14 @@ export default class extends Evented {
         }
         me.detailPanel = new DepartureBoardPanel({gtfsId, stopId, stopName});
         me.detailPanel.addTo(me);
+        const gtfs = me.gtfs.get(gtfsId),
+            stop = gtfs && gtfs.stops.get(stopId);
+        if (stop) {
+            // On touch there is no hover, so tapping a station shows the
+            // card together with the board; on desktop this is a no-op
+            // when the card is already showing for the same station.
+            me.showStationHover(stop);
+        }
     }
 
     trackObject(object) {
@@ -4111,6 +4296,7 @@ export default class extends Evented {
             if (detailPanel) {
                 detailPanel.remove();
                 delete me.detailPanel;
+                me.hideStationHover();
             }
         }
 
@@ -4123,6 +4309,7 @@ export default class extends Evented {
             if (me.detailPanel) {
                 me.detailPanel.remove();
                 delete me.detailPanel;
+                me.hideStationHover();
             }
             me.trackedObject = object;
 

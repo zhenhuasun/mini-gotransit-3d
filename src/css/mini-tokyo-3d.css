@@ -1086,6 +1086,30 @@
     width: max-content;
     white-space: nowrap;
 }
+.mini-tokyo-3d .popup-station .mapboxgl-popup-content {
+    padding: 10px 12px;
+    overflow-x: auto;
+}
+.mini-tokyo-3d .station-hover-name {
+    margin-bottom: 6px;
+    font-weight: bold;
+}
+.mini-tokyo-3d .station-route-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    line-height: 1.7;
+}
+.mini-tokyo-3d .station-route-block {
+    flex: none;
+    width: 34px;
+    height: 20px;
+    border-radius: 4px;
+    text-align: center;
+    font-size: 13px;
+    font-weight: bold;
+    line-height: 20px;
+}
 .mini-tokyo-3d .popup-touch .mapboxgl-popup-content {
     pointer-events: auto;
 }
