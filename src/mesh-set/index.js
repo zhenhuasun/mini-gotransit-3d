@@ -123,7 +123,8 @@ export default class {
             const material = me[`${key}Material`] = new ShaderMaterial({
                 uniforms: Object.assign({}, uniforms, {
                     base: {value: 1},
-                    markerColor: {value: new Vector3(...color)}
+                    markerColor: {value: new Vector3(...color)},
+                    pulse: {value: 1}
                 }),
                 vertexShader: delayMarkerVertexShader,
                 fragmentShader: delayMarkerFragmentShader,
@@ -131,6 +132,13 @@ export default class {
                 premultipliedAlpha: true,
                 depthWrite: false
             });
+
+            // The highlight marker is additive white in both modes so it
+            // stays visible on light and dark maps (a white sphere under
+            // MultiplyBlending would vanish on a light map).
+            if (key === 'highlightMarker') {
+                material.blending = AdditiveBlending;
+            }
 
             const mesh = me[`${key}Mesh`] = new Mesh(geometry, material);
 
@@ -187,6 +195,9 @@ export default class {
         uniforms.textureColor.value = textures[2];
 
         me.outlineMaterial.uniforms.intensity.value = blink();
+        if (me.highlightMarkerMaterial) {
+            me.highlightMarkerMaterial.uniforms.pulse.value = blink();
+        }
     }
 
     setInstanceIDs(ids) {
@@ -226,7 +237,7 @@ export default class {
         if (delayMarkerMesh) {
             delayMarkerMesh.material.blending = dark ? AdditiveBlending : MultiplyBlending;
         }
-        for (const key of ['delayMarkerYellow', 'delayMarkerRed', 'highlightMarker']) {
+        for (const key of ['delayMarkerYellow', 'delayMarkerRed']) {
             const material = this[`${key}Material`],
                 mesh = this[`${key}Mesh`];
             if (material) {
@@ -235,6 +246,15 @@ export default class {
             if (mesh) {
                 mesh.material.blending = dark ? AdditiveBlending : MultiplyBlending;
             }
+        }
+        // The highlight marker keeps additive blending and a dark base
+        // in both modes: additive white stays visible on a light map,
+        // and base 0 keeps the sphere's shading.
+        if (this.highlightMarkerMaterial) {
+            this.highlightMarkerMaterial.uniforms.base.value = 0;
+        }
+        if (this.highlightMarkerMesh) {
+            this.highlightMarkerMesh.material.blending = AdditiveBlending;
         }
     }
 
