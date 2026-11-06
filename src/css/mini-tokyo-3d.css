@@ -1098,7 +1098,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    line-height: 1.7;
+    line-height: 2;
 }
 .mini-tokyo-3d .station-route-block {
     flex: none;
