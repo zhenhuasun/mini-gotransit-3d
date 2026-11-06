@@ -419,17 +419,6 @@
 .mini-tokyo-3d .panel.collapsed {
     height: 50px;
 }
-@media (hover: hover) and (pointer: fine) {
-    .mini-tokyo-3d .departure-board-panel {
-        max-width: 92vw;
-    }
-    .mini-tokyo-3d .departure-board-panel span {
-        white-space: nowrap;
-    }
-    .mini-tokyo-3d .departure-board-panel #panel-content {
-        overflow-x: auto;
-    }
-}
 .mini-tokyo-3d #panel-header {
     position: relative;
     height: 30px;
