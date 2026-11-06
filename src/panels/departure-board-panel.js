@@ -229,28 +229,57 @@ export default class extends Panel {
                 let expectedHTML = row.expected || '—';
 
                 if (/cancel/i.test(row.status || '')) {
-                    expectedHTML = '<span style="color:#d00">Cancelled</span>';
+                    expectedHTML = '<span style="color:#ff6b6b">Cancelled</span>';
                 } else if (schedMin !== null && expMin !== null) {
                     if (expMin === schedMin) {
                         expectedHTML = '<span style="color:#0a0">On Time</span>';
                     } else if (expMin > schedMin) {
-                        expectedHTML = `<span style="color:#d00">${row.expected}</span>`;
+                        expectedHTML = `<span style="color:#ff6b6b">${row.expected}</span>`;
                     } else {
                         expectedHTML = `<span style="color:#06c">${row.expected}</span>`;
                     }
                 }
                 return [
-                    '<div style="display:flex;align-items:center;gap:8px;padding:6px 12px;border-bottom:1px solid rgba(0,0,0,.06)">',
+                    '<div class="board-row" style="display:flex;align-items:center;gap:8px;padding:6px 12px;border-bottom:1px solid rgba(0,0,0,.06)">',
                     `<span style="flex:none;width:34px;padding:2px 0;text-align:center;background:${row.color || '#666'};color:${row.textColor || '#fff'};border-radius:10px;font-weight:bold">${row.line}</span>`,
-                    `<span style="flex:1;text-align:left">${row.destination}</span>`,
-                    `<span style="min-width:52px;text-align:right">${row.scheduled || '—'}</span>`,
-                    `<span style="min-width:64px;text-align:right">${expectedHTML}</span>`,
+                    `<span class="board-destination" style="flex:1;text-align:left">${row.destination}</span>`,
+                    `<span style="min-width:52px;text-align:right;font-weight:bold">${row.scheduled || '—'}</span>`,
+                    `<span style="min-width:64px;text-align:right;font-weight:bold">${expectedHTML}</span>`,
                     `<span style="min-width:40px;text-align:right">${row.platform || '—'}</span>`,
                     '</div>'
                 ].join('');
             }),
             rows.length ? '' : '<div style="padding:8px 12px">No departures</div>'
         ].join(''));
+
+        // Desktop only: size the panel to its longest destination
+        // instead of stretching to the width cap. Each row's natural
+        // width is its cells' widths plus the gaps and padding: the
+        // destination cell is measured by scrollWidth because the panel
+        // squeezes it, the other cells by offsetWidth because they
+        // never shrink below their content. Mobile keeps the CSS width
+        // and wrapping.
+        if (me._container && window.matchMedia('(hover: hover) and (pointer: fine)').matches) {
+            const rows = me._container.querySelectorAll('.board-row');
+            let width = 0;
+            for (const row of rows) {
+                const cells = row.children;
+                if (cells.length < 5) {
+                    continue;
+                }
+                // 20px #panel-content padding + 24px row padding +
+                // 4 gaps of 8px, plus 4px slack for subpixel rounding.
+                width = Math.max(width, 20 + 24 + 32 +
+                    cells[0].offsetWidth + cells[1].scrollWidth +
+                    cells[2].offsetWidth + cells[3].offsetWidth +
+                    cells[4].offsetWidth + 4);
+            }
+            if (width) {
+                me._container.style.width = `${Math.min(width, window.innerWidth * 0.92)}px`;
+            } else {
+                me._container.style.removeProperty('width');
+            }
+        }
 
         return me;
     }

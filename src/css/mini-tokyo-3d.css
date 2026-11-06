@@ -426,6 +426,9 @@
     .mini-tokyo-3d .departure-board-panel span {
         white-space: nowrap;
     }
+    .mini-tokyo-3d .departure-board-panel #panel-content {
+        overflow-x: auto;
+    }
 }
 .mini-tokyo-3d #panel-header {
     position: relative;
