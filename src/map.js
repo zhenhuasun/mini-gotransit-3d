@@ -1197,10 +1197,10 @@ export default class extends Evented {
                     me.trackingModePanel.addTo(me);
                 }
             }, {
-                className: 'mapboxgl-ctrl-about',
-                title: dict['about'],
+                className: 'mapboxgl-ctrl-random',
+                title: 'Random',
                 eventHandler() {
-                    me.aboutPanel.addTo(me);
+                    me.trackRandomVehicle();
                 }
             }]));
         }
@@ -1217,6 +1217,17 @@ export default class extends Evented {
                 notificationCtrl = me.notificationCtrl = new NotificationControl({modules: [trainInfoModule]});
 
             map.addControl(notificationCtrl);
+        }
+
+        if (me.configControl) {
+            // The About button sits alone at the bottom of the control column.
+            map.addControl(new MapboxGLButtonControl([{
+                className: 'mapboxgl-ctrl-about',
+                title: 'About MiniGO3D',
+                eventHandler() {
+                    me.aboutPanel.addTo(me);
+                }
+            }]));
         }
 
         // Near a screen edge, iOS Safari sometimes withholds the synthetic
@@ -4233,6 +4244,30 @@ export default class extends Evented {
             // when the card is already showing for the same station.
             me.showStationHover(stop);
         }
+    }
+
+    // Pick a random active vehicle (train or bus), track it the same way
+    // as clicking it, and follow it in helicopter mode. The vehicle being
+    // followed right now is excluded, so every click switches to a new one.
+    trackRandomVehicle() {
+        const me = this,
+            vehicles = [];
+
+        for (const {activeBusLookup} of me.gtfs.values()) {
+            for (const bus of activeBusLookup.values()) {
+                if (!isEqualObject(me.trackedObject, bus)) {
+                    vehicles.push(bus);
+                }
+            }
+        }
+        if (vehicles.length === 0) {
+            return;
+        }
+        const vehicle = vehicles[Math.floor(Math.random() * vehicles.length)];
+
+        me.markObject(vehicle);
+        me.trackObject(vehicle);
+        me.setTrackingMode('helicopter');
     }
 
     trackObject(object) {

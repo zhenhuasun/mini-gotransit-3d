@@ -1079,6 +1079,9 @@
 .mini-tokyo-3d .mapboxgl-ctrl button.mapboxgl-ctrl-about .mapboxgl-ctrl-icon {
     background: no-repeat center/21px svg-load('../../node_modules/@fortawesome/fontawesome-free/svgs/solid/circle-info.svg', fill: #333);
 }
+.mini-tokyo-3d .mapboxgl-ctrl button.mapboxgl-ctrl-random .mapboxgl-ctrl-icon {
+    background: no-repeat center/21px svg-load('../../node_modules/@fortawesome/fontawesome-free/svgs/solid/shuffle.svg', fill: #333);
+}
 .mini-tokyo-3d .mapboxgl-popup-content {
     color: #fff;
     background-color: rgba(0, 0, 0, 0.7);
