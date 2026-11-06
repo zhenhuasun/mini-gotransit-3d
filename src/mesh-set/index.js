@@ -106,7 +106,7 @@ export default class {
         // Delay marker spheres: Tokyo trains (CAR) keep a single orange
         // marker; GO vehicles (BUS) get yellow (3-14 min late) and red
         // (15+ min late) markers driven by TripUpdates delay levels.
-        // The highlight marker is a larger white shell around the
+        // The highlight marker is a larger cyan shell around the
         // vehicle (same sphere, wider radius) so it reads as a glow
         // ring over the delay sphere instead of covering it.
         const delayMarkerColors = type === 'CAR' ? [
@@ -114,7 +114,7 @@ export default class {
         ] : type === 'BUS' ? [
             ['delayMarkerYellow', [1.0, 0.85, 0.0], 1.8],
             ['delayMarkerRed', [0.95, 0.15, 0.15], 1.8],
-            ['highlightMarker', [1.0, 1.0, 1.0], 2.6]
+            ['highlightMarker', [0.0, 0.898, 1.0], 2.6]
         ] : [];
 
         for (const [key, color, radius] of delayMarkerColors) {
@@ -133,7 +133,7 @@ export default class {
                 depthWrite: false
             });
 
-            // The highlight marker is additive white in both modes so it
+            // The highlight marker is additive cyan in both modes so it
             // stays visible on light and dark maps (a white sphere under
             // MultiplyBlending would vanish on a light map).
             if (key === 'highlightMarker') {
@@ -248,7 +248,7 @@ export default class {
             }
         }
         // The highlight marker keeps additive blending and a dark base
-        // in both modes: additive white stays visible on a light map,
+        // in both modes: additive cyan stays visible on a light map,
         // and base 0 keeps the sphere's shading.
         if (this.highlightMarkerMaterial) {
             this.highlightMarkerMaterial.uniforms.base.value = 0;

@@ -3999,7 +3999,7 @@ export default class extends Evented {
         }
     }
 
-    // Highlights the given delay-dashboard vehicles: a white marker
+    // Highlights the given delay-dashboard vehicles: a cyan marker
     // above each one plus a bold line for each of their routes. Call
     // with null or [] to clear. The dashboard owns the route-highlight
     // state exclusively (updateBusRouteHighlight has no other caller),
