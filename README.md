@@ -1,39 +1,49 @@
-# Mini Tokyo 3D
+# Mini-GO Transit 3D
 
-A real-time 3D digital map of Tokyo's public transport system.
+Watch GO live, in 3D.
 
-![Screenshot](https://minitokyo3d.com/images/screenshot1.jpg)
+A real-time 3D map of GO Transit trains and buses across the Greater Toronto Area, forked from [Mini Tokyo 3D](https://github.com/nagix/mini-tokyo-3d).
 
-![Screenshot](https://minitokyo3d.com/images/screenshot2.jpg)
+![Mini-GO Transit 3D](https://zhenhuasun.github.io/mini-gotransit-3d/og-thumbnail.jpg)
 
-![Screenshot](https://minitokyo3d.com/images/screenshot3.jpg)
+See the [live demo](https://zhenhuasun.github.io/mini-gotransit-3d/).
 
-See a [Live Demo](https://minitokyo3d.com).
+## What it shows
 
-## Demo Videos
+- **Live vehicles** — every GO train and bus on the map, updated from GTFS-RT VehiclePositions every 15 seconds.
+- **Live delays** — TripUpdates every 30 seconds. Vehicles running 3–14 minutes late get a yellow marker, 15 minutes or more a red one.
+- **Departure board** — click or tap any station (or search for one) to see upcoming departures with scheduled and expected times. Platform info is shown for Union Station.
+- **Delay dashboard** — a per-minute delay distribution across all live vehicles, with corridor filters (BR, KI, LE, LW, MI, RH, ST, plus Bus). Click a bar to highlight every vehicle in that minute.
+- **Station cards** — hover or tap a station to see every route that serves it.
+- **3D station markers** — rail stations and bus stops rendered as discs, sized and colored by type.
+- **Random vehicle** — the shuffle button jumps to a random live train or bus and follows it.
+- **Playback mode** — replay the timetable and watch a day of GO service unfold.
+- **Tracking modes** — follow a vehicle from behind, above, in front, by helicopter, drone, or bird's-eye view.
 
-- [Demo Video (2025, English)](https://youtu.be/9Cks5UQU0vY)
-- [Demo Video (2025, Japanese)](https://youtu.be/8FC2adzAUIA)
-- [Demo Video (2021, English)](https://youtu.be/CGkHDAj8rGY)
-- [Demo Video (2021, Japanese)](https://youtu.be/C9AA3bDcHk8)
-- [Demo Video (2019, English)](https://youtu.be/sxFEwj0sBJk)
-- [Demo Video (2019, Japanese)](https://youtu.be/_3N651UnxDA)
+## Data
 
-## User Guides
+- **Static schedule**: GO Transit GTFS, slimmed to a 3-day window with full-fidelity shapes (no simplification) by `tools/slim_gtfs.py`, refreshed daily by a GitHub Action and served from this repo at `gtfs/GO-GTFS-slim.zip`.
+- **Realtime**: GO Open Data API (VehiclePositions, TripUpdates, NextService, Service at a Glance, UnionDepartures) through a Cloudflare Worker proxy, so the API key stays server-side and never reaches the browser.
+- **Basemap**: Mapbox.
 
-- [User Guide (English)](https://minitokyo3d.com/docs/master/)
-- [User Guide (Japanese)](https://minitokyo3d.com/docs/master/ja/)
-- [User Guide (French)](https://minitokyo3d.com/docs/master/fr/)
-- [User Guide (Simplified Chinese)](https://minitokyo3d.com/docs/master/zh-Hans/)
+## How to run locally
 
-## Developer Guides
+A Mapbox access token is required. Put it in `.env` (`MAPBOX_ACCESS_TOKEN=...`).
 
-- [Developer Guide (English)](https://minitokyo3d.com/docs/master/developer-guide/)
-- [Developer Guide (Japanese)](https://minitokyo3d.com/docs/master/ja/developer-guide/)
-- [Developer Guide (French)](https://minitokyo3d.com/docs/master/fr/developer-guide/)
-- [Developer Guide (Simplified Chinese)](https://minitokyo3d.com/docs/master/zh-Hans/developer-guide/)
+```bash
+npm install
+npm run dev
+```
 
-## Cheat Sheet
+Then open http://localhost:9966. The dev build is unminified and keeps `console.*` calls, so console debugging works locally. (The production bundle strips all `console.*` calls.)
+
+To build for production:
+
+```bash
+npm run build
+```
+
+## Cheat sheet
 
 Operation | Description
 --- | ---
@@ -45,73 +55,31 @@ Pinch in/out | Zoom in/out
 Two-finger drag | Tilt up/down and rotate
 Double-click or triple-tap | Zoom in
 Shift key + Double-click or two-finger tap | Zoom out
-Click or tap the search button | Show/hide the route search panel
+Click or tap the search button | Show the station search panel
 Click or tap +/- buttons | Zoom in/out
 Click or tap the compass button | Reset bearing to north
-Click or tap the compass button + mouse or finder drag | Rotate
+Click or tap the compass button + mouse or finger drag | Rotate
 Click or tap the fullscreen button | Toggle the fullscreen mode
 Click or tap the eye button | Toggle the underground mode
 Click or tap the playback button | Toggle the playback mode
 Click or tap the battery button | Toggle the eco mode
+Click or tap the chart button | Show/hide the delay dashboard
 Click or tap the layer button | Show/hide the layer display settings panel
 Click or tap the camera button | Show/hide the tracking mode settings panel
+Click or tap the shuffle button | Jump to a random live vehicle and follow it
 Click or tap the info button | Show/hide the app info panel
-Click or tap a train/aircraft/station | Enable tracking or select station
-Click or tap the map | Disable tracking or deselect station
-Hover a train/aircraft/station | Show the train/aircraft/station information
+Click or tap a vehicle or station | Track the vehicle or open the station board
+Click or tap the map | Stop tracking or close the board
+Hover a vehicle or station | Show the vehicle or station information
 
-## Language Support
+## About data
 
-Currently, the following languages are supported. Any help or contribution with translations and additional language support is always greatly appreciated.
+Schedule and realtime data come from GO Transit via the Metrolinx Open Data API. The slimmed GTFS feed in this repo is regenerated daily; its validity window is three days from the build date.
 
-Language | User Interface | Map Labels | Stations, Railways, Airlines, etc. | User Guide
---- | --- | --- | --- | ---
-English | Yes | Yes | Yes | Yes
-Japanese | Yes | Yes | Yes | Yes
-French | Yes | Yes | Yes | Yes
-Chinese (Simplified) | Yes | Yes | Yes | Yes
-Chinese (Traditional) | Yes | Yes | Yes | -
-Korean | Yes | Yes | Yes | -
-Thai | Yes | - | - | -
-Nepali | Yes | - | - | -
-Portuguese (Brazil) | Yes | - | - | -
-Spanish | Yes | - | - | -
-German | Yes | - | - | -
+## Acknowledgements
 
-If you want to contribute, please start with translating the UI messages in the `dictionary-<ISO 639-1 code>.json` file in the [`data`](https://github.com/nagix/mini-tokyo-3d/tree/master/data) directory. Then, if you have extra energy, add the title of each item in your language to [`airports.json`](https://github.com/nagix/mini-tokyo-3d/blob/master/data/airports.json), [`flight-statuses.json`](https://github.com/nagix/mini-tokyo-3d/blob/master/data/flight-statuses.json), [`operators.json`](https://github.com/nagix/mini-tokyo-3d/blob/master/data/operators.json), [`poi.json`](https://github.com/nagix/mini-tokyo-3d/blob/master/data/poi.json), [`rail-directions.json`](https://github.com/nagix/mini-tokyo-3d/blob/master/data/rail-directions.json), [`railways.json`](https://github.com/nagix/mini-tokyo-3d/blob/master/data/railways.json), [`stations.json`](https://github.com/nagix/mini-tokyo-3d/blob/master/data/stations.json), [`train-types.json`](https://github.com/nagix/mini-tokyo-3d/blob/master/data/train-types.json) in the [`data`](https://github.com/nagix/mini-tokyo-3d/tree/master/data) directory.
-
-## About Data
-
-The data for this visualization are sourced from the [Public Transportation Open Data Center](https://www.odpt.org), which includes station information and train timetables as well as real-time data such as train location information and status information of multiple railway lines in the Greater Tokyo area.
-
-## How to Build
-
-First, get access tokens for the public transportation data and map tiles by signing up at the [Public Transportation Open Data Center](https://developer.odpt.org/signup) and [Mapbox](https://account.mapbox.com/auth/signup/). At the Public Transportation Open Data Center, you need to get both tokens for ODPT Center and Challenge 2026.
-
-The latest version of Node.js is required. Move to the root directory of the application and install the dependencies.
-```bash
-npm install
-```
-
-Provide the access tokens through environment variables and run the build. The script, dataset and static web page will be generated in the `build` directory.
-```bash
-MAPBOX_ACCESS_TOKEN=<Mapbox access token> \
-MT3D_SECRET_ODPT=<access token for Public Transportation Open Data Center> \
-MT3D_SECRET_CHALLENGE=<access token for Open Data Challenge for Public Transportation 2026> \
-npm run build-all
-```
-
-Finally, place all the files in the `build` directory on your web server.
-
-See the [Developer Guides](#developer-guides) for more details.
+This project is a fork of [Mini Tokyo 3D](https://github.com/nagix/mini-tokyo-3d) by [Akihiko Kusanagi (nagix)](https://github.com/nagix), a real-time 3D digital map of Tokyo's public transport system. The engine, the GPGPU vehicle renderer, and the map controls are his work; this fork adapts them to GO Transit in Toronto.
 
 ## License
 
-Mini Tokyo 3D is available under the [MIT license](https://opensource.org/licenses/MIT).
-
-## Supporting Mini Tokyo 3D
-
-Your support, large or small, helps keep this project strong!
-
-- [Monthly donation through GitHub Sponsors](https://github.com/sponsors/nagix)
-- [One-time donation through PayPal](https://www.paypal.me/akusanagi)
+Mini-GO Transit 3D is available under the [MIT license](https://opensource.org/licenses/MIT).
