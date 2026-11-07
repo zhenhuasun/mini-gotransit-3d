@@ -4,9 +4,14 @@
 /node_modules
 /package-lock.json
 /stats.html
+/replay-data
 secrets
 .env
 .env.*
 !.env.example
 .DS_Store
 .eslintcache
+.venv/
+__pycache__/
+*.pyc
+replay-data/
