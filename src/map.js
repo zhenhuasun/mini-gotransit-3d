@@ -12,6 +12,7 @@ import Dataset from './dataset';
 import {Airport, Bus, Flight, FlightStatus, GTFSRoute, GTFSStop, GTFSTrip, Operator, POI, RailDirection, Railway, Station, Train, TrainTimetables, TrainType, TrainVehicleType} from './data-classes';
 import extend from './extend';
 import * as helpers from './helpers/helpers';
+import {applyVehiclePosition, getBusMotion, getBusWaitDuration, getStopOffsets, updateBusSection} from './helpers/helpers-bus-motion';
 import {disableAutoHover, pickObject, resetCursor} from './helpers/helpers-deck';
 import * as helpersGeojson from './helpers/helpers-geojson';
 import * as helpersMapbox from './helpers/helpers-mapbox';
@@ -20,7 +21,6 @@ import {GeoJsonLayer, GlowCompositeLayer, RailwayStatusGlowLayer, STROKE_WIDTH_S
 import {isExpired, loadBusData, loadDictionary, loadDynamicBusData, loadDynamicFlightData, loadDynamicTrainData, loadStaticData, loadTimetableData, updateOdptUrl} from './loader';
 import {AboutPanel, BusPanel, DelayDashboardPanel, DepartureBoardPanel, LayerPanel, SharePanel, StationPanel, TrackingModePanel, TrainPanel} from './panels';
 import Plugin from './plugin';
-import nearestCloserPointOnLine from './turf/nearest-closer-point-on-line';
 
 const RAILWAY_NAMBOKU = 'TokyoMetro.Namboku',
     RAILWAY_MITA = 'Toei.Mita',
@@ -1937,17 +1937,13 @@ export default class extends Evented {
                     route = gtfs.routes.get(trip.route);
 
                 if (departureTimes[0] <= now && now <= departureTimes[departureTimes.length - 1] && !gtfs.activeBusLookup.has(trip.id) && route && !route.hidden) {
-                    let offset = 0;
                     const feature = gtfs.featureLookup.get(trip.shape);
 
                     if (!feature) {
                         continue;
                     }
 
-                    const offsets = trip.stops.map(stopId =>
-                        // Use the previous offset to calulate a weight and pick a closer point
-                        (offset = nearestCloserPointOnLine(feature, gtfs.stops.get(stopId).coord, offset).properties.totalDistance)
-                    );
+                    const offsets = getStopOffsets(feature, trip.stops.map(stopId => gtfs.stops.get(stopId).coord));
 
                     me.busStart(new Bus({
                         gtfsId: gtfs.id,
@@ -1975,8 +1971,7 @@ export default class extends Evented {
     busRepeat(bus, index) {
         const me = this,
             clock = me.clock,
-            now = clock.getTimeOffset(),
-            minBusStandingDuration = configs.minBusStandingDuration;
+            now = clock.getTimeOffset();
         let final;
 
         if (bus.stop === undefined) {
@@ -1992,56 +1987,18 @@ export default class extends Evented {
             me.detailPanel.updateHeader();
         }
 
-        const {offsets, sectionIndex, sectionLength} = bus,
-            distance = Math.abs(offsets[sectionIndex + sectionLength] - offsets[sectionIndex]);
+        const motion = !final && getBusMotion(bus, now, index, clock.speed);
 
-        // Sometimes distance becomes 0 because the busroute coordinates
-        // are incorrect and a few busstops shares the same coordinates.
-        if (!final && sectionLength > 0 && distance === 0) {
-            console.log('bus zero interval:', bus);
-        }
+        if (motion) {
+            const {startTime, duration, accelerationTime, normalizedAcceleration} = motion;
 
-        if (!final && sectionLength > 0 && distance > 0) {
-            const minDelay = configs.minDelay,
-                {departureTime, nextDepartureTime} = bus,
-                actualDepartureTime = index !== undefined ? Math.max(departureTime, now + (clock.speed === 1 ? minBusStandingDuration : 0)) : helpers.valueOrDefault(departureTime, now);
-            let {maxBusSpeed, busAcceleration, maxBusAccelerationTime, maxBusAccDistance} = configs,
-                duration, maxDuration, accelerationTime;
+            me.trafficLayer.updateObject(bus, startTime, duration, accelerationTime, normalizedAcceleration, accelerationTime, normalizedAcceleration);
 
-            if (nextDepartureTime !== undefined) {
-                maxDuration = nextDepartureTime - minBusStandingDuration + 60000 - minDelay - actualDepartureTime;
-            }
-
-            if (distance <= maxBusAccDistance * 2) {
-                duration = Math.sqrt(distance / busAcceleration) * 2;
-                if (maxDuration > 0) {
-                    duration = helpers.clamp(duration, 0, maxDuration);
-                    busAcceleration = distance * 4 / duration / duration;
-                }
-                accelerationTime = duration / 2;
-            } else {
-                duration = maxBusAccelerationTime * 2 + (distance - maxBusAccDistance * 2) / maxBusSpeed;
-                if (maxDuration > 0) {
-                    duration = helpers.clamp(duration, 0, maxDuration);
-                    maxBusAccDistance = busAcceleration * duration * duration / 8;
-                    if (distance >= maxBusAccDistance * 2) {
-                        maxBusSpeed = distance * 2 / duration;
-                        busAcceleration = maxBusSpeed * 2 / duration;
-                    } else {
-                        maxBusSpeed = busAcceleration * duration / 2 - Math.sqrt(busAcceleration * (maxBusAccDistance * 2 - distance));
-                    }
-                }
-                accelerationTime = maxBusSpeed / busAcceleration;
-            }
-            me.trafficLayer.updateObject(bus, actualDepartureTime, duration, accelerationTime, busAcceleration / distance, accelerationTime, busAcceleration / distance);
-
-            me.gtfs.get(bus.gtfsId).activeBusLookup.schedule(bus.trip.id, clock.getHighResTime() + (actualDepartureTime + duration - now), () => {
+            me.gtfs.get(bus.gtfsId).activeBusLookup.schedule(bus.trip.id, clock.getHighResTime() + (startTime + duration - now), () => {
                 me.busRepeat(bus, bus.stop === undefined ? bus.sectionIndex + 1 : undefined);
             });
         } else {
-            const waitDuration = bus.stop === undefined ?
-                Math.max(bus.nextDepartureTime - now, minBusStandingDuration) :
-                final ? minBusStandingDuration : configs.realtimeCheckInterval;
+            const waitDuration = getBusWaitDuration(bus, now, final);
 
             me.gtfs.get(bus.gtfsId).activeBusLookup.schedule(bus.trip.id, clock.getHighResTime() + waitDuration, () => {
                 if (final) {
@@ -3441,11 +3398,7 @@ export default class extends Evented {
                     if (isActive) {
                         bus = activeBusLookup.get(tripId);
                     } else {
-                        let offset = 0;
-                        const offsets = trip.stops.map(stopId =>
-                            // Use the previous offset to calulate a weight and pick a closer point
-                            (offset = nearestCloserPointOnLine(feature, stops.get(stopId).coord, offset).properties.totalDistance)
-                        );
+                        const offsets = getStopOffsets(feature, trip.stops.map(stopId => stops.get(stopId).coord));
 
                         bus = new Bus({
                             id: vehicle ? vehicle.licensePlate || vehicle.id : id,
@@ -3456,18 +3409,7 @@ export default class extends Evented {
                             offset: 0
                         });
                     }
-                    bus.status = vp.currentStatus;
-                    if (stop) {
-                        bus.stop = stop;
-                    } else {
-                        const offsets = bus.offsets,
-                            // Use the current bus.offset to calulate a weight and pick a closer point
-                            offset = bus.offset = nearestCloserPointOnLine(feature, [position.longitude, position.latitude], bus.offset).properties.totalDistance;
-
-                        bus.stop = trip.stopSequences[offsets.reduce(
-                            (acc, cur, i) => cur < offset ? Math.min(i + 1, offsets.length - 1) : acc, 0
-                        )];
-                    }
+                    applyVehiclePosition(bus, vp, trip, feature);
                     if (!isActive) {
                         const tripDelay = me.getTripDelay(gtfs, tripId, me.clock.getTime());
                         if (tripDelay) {
@@ -4820,53 +4762,7 @@ export default class extends Evented {
     }
 
     setBusSectionData(bus, index, final) {
-        const stopSequences = bus.trip.stopSequences,
-            now = this.clock.getTimeOffset();
-        let departureTimes, currentSection;
-
-        if (bus.stop === undefined) {
-            departureTimes = bus.trip.departureTimes;
-            currentSection = helpers.valueOrDefault(index, departureTimes.reduce(
-                (acc, cur, i) => cur <= now ? i : acc, 0
-            ));
-        } else {
-            currentSection = stopSequences.indexOf(bus.stop);
-        }
-
-        // Guard for an unexpected error
-        // Potential data quality issue
-        if (currentSection === -1) {
-            console.log('no bus stop', bus);
-        }
-
-        const finalSection = stopSequences.length - 1;
-
-        if (bus.stop === undefined) {
-            if (currentSection !== finalSection) {
-                bus.sectionIndex = currentSection;
-                bus.sectionLength = 1;
-                bus.departureTime = departureTimes[currentSection];
-                bus.nextDepartureTime = departureTimes[currentSection + 1];
-
-                return true;
-            }
-        } else {
-            let actualSection, nextSection;
-
-            if (bus.sectionIndex === undefined) {
-                actualSection = nextSection = currentSection;
-            } else {
-                actualSection = bus.sectionIndex + bus.sectionLength;
-                nextSection = Math.min(currentSection + 1, finalSection);
-            }
-
-            if (!final && actualSection !== finalSection) {
-                bus.sectionIndex = actualSection;
-                bus.sectionLength = nextSection - actualSection;
-
-                return true;
-            }
-        }
+        return updateBusSection(bus, this.clock.getTimeOffset(), index, final);
     }
 }
 

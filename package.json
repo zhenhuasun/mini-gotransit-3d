@@ -36,7 +36,8 @@
     "docs": "vuepress build docs --no-cache",
     "docs:dev": "vuepress dev docs --no-cache",
     "lint": "eslint --cache . && sort-package-json --check",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "replay-vp": "node --use-system-ca --no-warnings scripts/replay-vp.mjs"
   },
   "dependencies": {
     "@deck.gl/core": "^8.9.36",
