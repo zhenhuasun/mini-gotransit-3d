@@ -19,7 +19,7 @@ import * as helpersMapbox from './helpers/helpers-mapbox';
 import * as helpersWebgl from './helpers/helpers-webgl';
 import {GeoJsonLayer, GlowCompositeLayer, RailwayStatusGlowLayer, STROKE_WIDTH_SCALE_STOPS, StationGlowLayer, ThreeLayer, Tile3DLayer, TrafficLayer, ZoomWidthScaleExtension} from './layers';
 import {isExpired, loadBusData, loadDictionary, loadDynamicBusData, loadDynamicFlightData, loadDynamicTrainData, loadStaticData, loadTimetableData, updateOdptUrl} from './loader';
-import {AboutPanel, BusPanel, DelayDashboardPanel, DepartureBoardPanel, GoLayerPanel, LayerPanel, SharePanel, StationPanel, TrackingModePanel, TrainPanel} from './panels';
+import {AboutPanel, BusPanel, DelayDashboardPanel, DepartureBoardPanel, LayerPanel, SharePanel, StationPanel, TrackingModePanel, TrainPanel} from './panels';
 import Plugin from './plugin';
 
 const RAILWAY_NAMBOKU = 'TokyoMetro.Namboku',
@@ -186,18 +186,6 @@ export default class extends Evented {
         // separately from me.gtfs (which is only populated once loading finishes)
         // so overlapping refreshBusData calls don't load the same source twice.
         me.gtfsLoading = new Set();
-
-        // TEMP AUTO-PROBE (local dev only, remove before push): with
-        // ?autoprobe=1, hide GO Bus once the feed is loaded, so the probe
-        // in setGoGroupVisible runs without any clicking.
-        if (typeof location !== 'undefined' && new URLSearchParams(location.search).has('autoprobe')) {
-            const probeTimer = setInterval(() => {
-                if (me.gtfs.has('go') && me.map && me.map.getSource('go')) {
-                    clearInterval(probeTimer);
-                    me.setGoGroupVisible('go', 3, false);
-                }
-            }, 2000);
-        }
 
         Promise.all([
             loadDictionary(me.lang)
@@ -1192,7 +1180,6 @@ export default class extends Evented {
         }]));
 
         me.layerPanel = new LayerPanel({layers: me.plugins});
-        me.goLayerPanel = new GoLayerPanel();
         me.trackingModePanel = new TrackingModePanel();
         me.aboutPanel = new AboutPanel();
 
@@ -1201,7 +1188,7 @@ export default class extends Evented {
                 className: 'mapboxgl-ctrl-layers',
                 title: dict['select-layers'],
                 eventHandler() {
-                    me.goLayerPanel.addTo(me);
+                    me.layerPanel.addTo(me);
                 }
             }, {
                 className: 'mapboxgl-ctrl-tracking-mode',
@@ -4614,55 +4601,6 @@ export default class extends Evented {
         }
         delete me.lastRefresh;
         delete me.lastRealtimeCheck;
-    }
-
-    setGoGroupVisible(gtfsId, routeType, visible) {
-        const me = this,
-            gtfs = me.gtfs.get(gtfsId);
-
-        if (!gtfs) {
-            return;
-        }
-        for (const route of gtfs.routes.getAll()) {
-            if (route.type === routeType) {
-                route.hidden = !visible;
-            }
-        }
-        me.updateBusRouteVisibility();
-
-        // TEMP DIAGNOSTIC PROBE (local dev only, remove before push):
-        // verify whether setFeatureState actually stores the hidden state.
-        // Only runs with ?autoprobe=1 so normal use is unaffected.
-        if (typeof location !== 'undefined' && new URLSearchParams(location.search).has('autoprobe')) {
-            try {
-                const map = me.map,
-                    ids = [...gtfs.featureLookup.keys()];
-                let hiddenCount = 0;
-                for (const id of ids) {
-                    if (map.getFeatureState({source: gtfsId, id}).hidden === true) {
-                        hiddenCount++;
-                    }
-                }
-                const paint = map.getPaintProperty(`busroute-${gtfsId}-og-`, 'line-opacity');
-                document.title = `PROBE visible=${visible} shapes=${ids.length} hidden=${hiddenCount} sample=${ids[0]} paint=${JSON.stringify(paint).slice(0, 90)}`;
-            } catch (e) {
-                document.title = `PROBE ERROR: ${e.message}`;
-            }
-        }
-    }
-
-    isGoGroupVisible(gtfsId, routeType) {
-        const gtfs = this.gtfs.get(gtfsId);
-
-        if (!gtfs) {
-            return true;
-        }
-        for (const route of gtfs.routes.getAll()) {
-            if (route.type === routeType && route.hidden) {
-                return false;
-            }
-        }
-        return true;
     }
 
     updateBusRouteHighlight(gtfsId, routeId) {
