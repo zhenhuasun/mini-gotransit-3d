@@ -187,6 +187,18 @@ export default class extends Evented {
         // so overlapping refreshBusData calls don't load the same source twice.
         me.gtfsLoading = new Set();
 
+        // TEMP AUTO-PROBE (local dev only, remove before push): with
+        // ?autoprobe=1, hide GO Bus once the feed is loaded, so the probe
+        // in setGoGroupVisible runs without any clicking.
+        if (typeof location !== 'undefined' && new URLSearchParams(location.search).has('autoprobe')) {
+            const probeTimer = setInterval(() => {
+                if (me.gtfs.has('go') && me.map && me.map.getSource('go')) {
+                    clearInterval(probeTimer);
+                    me.setGoGroupVisible('go', 3, false);
+                }
+            }, 2000);
+        }
+
         Promise.all([
             loadDictionary(me.lang)
                 .then(dict => (me.dict = dict))
@@ -4617,6 +4629,26 @@ export default class extends Evented {
             }
         }
         me.updateBusRouteVisibility();
+
+        // TEMP DIAGNOSTIC PROBE (local dev only, remove before push):
+        // verify whether setFeatureState actually stores the hidden state.
+        // Only runs with ?autoprobe=1 so normal use is unaffected.
+        if (typeof location !== 'undefined' && new URLSearchParams(location.search).has('autoprobe')) {
+            try {
+                const map = me.map,
+                    ids = [...gtfs.featureLookup.keys()];
+                let hiddenCount = 0;
+                for (const id of ids) {
+                    if (map.getFeatureState({source: gtfsId, id}).hidden === true) {
+                        hiddenCount++;
+                    }
+                }
+                const paint = map.getPaintProperty(`busroute-${gtfsId}-og-`, 'line-opacity');
+                document.title = `PROBE visible=${visible} shapes=${ids.length} hidden=${hiddenCount} sample=${ids[0]} paint=${JSON.stringify(paint).slice(0, 90)}`;
+            } catch (e) {
+                document.title = `PROBE ERROR: ${e.message}`;
+            }
+        }
     }
 
     isGoGroupVisible(gtfsId, routeType) {
