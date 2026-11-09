@@ -12,7 +12,7 @@ import Dataset from './dataset';
 import {Airport, Bus, Flight, FlightStatus, GTFSRoute, GTFSStop, GTFSTrip, Operator, POI, RailDirection, Railway, Station, Train, TrainTimetables, TrainType, TrainVehicleType} from './data-classes';
 import extend from './extend';
 import * as helpers from './helpers/helpers';
-import {applyVehiclePosition, getBusMotion, getBusWaitDuration, getStopOffsets, updateBusSection} from './helpers/helpers-bus-motion';
+import {applyVehiclePosition, getBusMotion, getBusWaitDuration, getMoveDistances, getMotionDistance, getServiceDate, getStopOffsets, getVanishedBuses, isInServiceWindow, updateBusSection} from './helpers/helpers-bus-motion';
 import {disableAutoHover, pickObject, resetCursor} from './helpers/helpers-deck';
 import * as helpersGeojson from './helpers/helpers-geojson';
 import * as helpersMapbox from './helpers/helpers-mapbox';
@@ -1968,17 +1968,21 @@ export default class extends Evented {
         me.busRepeat(bus);
     }
 
-    busRepeat(bus, index) {
+    busRepeat(bus, index, onTick) {
         const me = this,
             clock = me.clock,
-            now = clock.getTimeOffset();
-        let final;
+            now = clock.getTimeOffset(),
+            // What the viewer sees right now, for re-anchoring on a VP tick
+            rendered = onTick && bus.motion ? getMotionDistance(bus.motion, now) : undefined,
+            // Realtime vehicles are removed by getVanishedBuses, not here
+            plan = me.setBusSectionData(bus, index, rendered && rendered.distance, onTick);
 
-        if (bus.stop === undefined) {
-            final = !me.setBusSectionData(bus, index);
-        } else {
-            final = !me.setBusSectionData(bus, undefined, !me.gtfs.get(bus.gtfsId).realtimeBuses.has(bus.trip.id));
+        // Repeated or stale fix: keep the current motion and its scheduled callback
+        if (plan && plan.ignore) {
+            return;
         }
+
+        const final = !plan;
 
         if (me.markedObject === bus) {
             me.updatePopup({setHTML: true});
@@ -1987,17 +1991,29 @@ export default class extends Evented {
             me.detailPanel.updateHeader();
         }
 
-        const motion = !final && getBusMotion(bus, now, index, clock.speed);
+        const routeType = me.gtfs.get(bus.gtfsId).routes.get(bus.trip.route).type,
+            // A moving vehicle keeps its speed when it is re-anchored
+            motion = !final && getBusMotion(bus, now, index, clock.speed, routeType, !!rendered && rendered.t > 0 && rendered.t < 1, plan.speedKMPH);
 
         if (motion) {
-            const {startTime, duration, accelerationTime, normalizedAcceleration} = motion;
+            const {startTime, duration, accelerationTime, normalizedAcceleration, decelerationTime, normalizedDeceleration} = motion,
+                [startDistance, endDistance] = getMoveDistances(bus);
 
-            me.trafficLayer.updateObject(bus, startTime, duration, accelerationTime, normalizedAcceleration, accelerationTime, normalizedAcceleration);
+            me.trafficLayer.updateObject(bus, startTime, duration, accelerationTime, normalizedAcceleration, decelerationTime, normalizedDeceleration);
+            bus.motion = {startDistance, endDistance, startTime, duration, accT: accelerationTime, accN: normalizedAcceleration, decT: decelerationTime, decN: normalizedDeceleration};
 
             me.gtfs.get(bus.gtfsId).activeBusLookup.schedule(bus.trip.id, clock.getHighResTime() + (startTime + duration - now), () => {
                 me.busRepeat(bus, bus.stop === undefined ? bus.sectionIndex + 1 : undefined);
             });
         } else {
+            if (!final && bus.stop !== undefined && bus.startDistance !== undefined) {
+                // Stand where the vehicle is now (a hold or teleport must stop the previous move)
+                const [startDistance, endDistance] = getMoveDistances(bus);
+
+                me.trafficLayer.updateObject(bus, now, 0, 0, 0, 0, 0);
+                bus.motion = {startDistance, endDistance, startTime: now, duration: 0, accT: 0, accN: 0, decT: 0, decN: 0};
+            }
+
             const waitDuration = getBusWaitDuration(bus, now, final);
 
             me.gtfs.get(bus.gtfsId).activeBusLookup.schedule(bus.trip.id, clock.getHighResTime() + waitDuration, () => {
@@ -2871,25 +2887,6 @@ export default class extends Evented {
                 // the label layer so labels draw on top. A letter stop
                 // id other than PA is a rail station; numeric ids are
                 // bus stops.
-                const stopRouteVotes = new Map();
-
-                for (const trip of me.gtfs.get(id).trips.getAll()) {
-                    const route = me.gtfs.get(id).routes.get(trip.route),
-                        color = route && route.color;
-
-                    if (!color) {
-                        continue;
-                    }
-                    for (const stopId of trip.stops) {
-                        let votes = stopRouteVotes.get(stopId);
-
-                        if (!votes) {
-                            votes = stopRouteVotes.set(stopId, new Map()).get(stopId);
-                        }
-                        votes.set(color, (votes.get(color) || 0) + 1);
-                    }
-                }
-
                 for (const [key, radius, elevation, isHalo] of STATION_MARKER_LAYERS) {
                     const isRail = key.startsWith('rail'),
                         markerData = [];
@@ -2906,18 +2903,7 @@ export default class extends Evented {
                             if (stop.id === 'UN') {
                                 rgb = [0, 0, 0];
                             } else {
-                                const votes = stopRouteVotes.get(stop.id);
-                                let bestColor, bestCount = 0;
-
-                                if (votes) {
-                                    for (const [color, count] of votes) {
-                                        if (count > bestCount) {
-                                            bestCount = count;
-                                            bestColor = color;
-                                        }
-                                    }
-                                }
-                                rgb = bestColor ? helpers.colorToRGBArray(bestColor) : [0, 166, 81];
+                                rgb = stop.color ? helpers.colorToRGBArray(stop.color) : [0, 166, 81];
                             }
                         } else {
                             rgb = [158, 158, 158];
@@ -3368,6 +3354,9 @@ export default class extends Evented {
                 realtimeBuses.clear();
                 gtfs.date = me.clock.getString(data.header.timestamp * 1000);
 
+                const now = me.clock.getTimeOffset(),
+                    serviceDate = getServiceDate(me.clock.getString());
+
                 for (const {id, vehicle: vp} of data.entity) {
                     if (!vp) {
                         continue;
@@ -3382,10 +3371,20 @@ export default class extends Evented {
                         continue;
                     }
 
+                    const trip = trips.get(tripId);
+
+                    // Outside its service window a trip has no vehicle: not
+                    // created, and removed if already active
+                    if (trip && !isInServiceWindow(trip, now, serviceDate)) {
+                        if (activeBusLookup.has(tripId)) {
+                            me.stopBus(activeBusLookup.get(tripId));
+                        }
+                        continue;
+                    }
+
                     realtimeBuses.add(tripId);
 
-                    const trip = trips.get(tripId),
-                        feature = trip && featureLookup.get(trip.shape),
+                    const feature = trip && featureLookup.get(trip.shape),
                         route = trip && routes.get(trip.route);
 
                     if (!trip || !feature || !route || route.hidden) {
@@ -3409,7 +3408,7 @@ export default class extends Evented {
                             offset: 0
                         });
                     }
-                    applyVehiclePosition(bus, vp, trip, feature);
+                    applyVehiclePosition(bus, vp, trip, feature, Number(data.header.timestamp), route.type);
                     if (!isActive) {
                         const tripDelay = me.getTripDelay(gtfs, tripId, me.clock.getTime());
                         if (tripDelay) {
@@ -3417,7 +3416,13 @@ export default class extends Evented {
                             bus.delayLevel = tripDelay.level;
                         }
                         me.busStart(bus);
+                    } else {
+                        me.busRepeat(bus, undefined, true);
                     }
+                }
+
+                for (const bus of getVanishedBuses(activeBusLookup.values(), realtimeBuses)) {
+                    me.stopBus(bus);
                 }
 
                 me.aboutPanel.updateContent();
@@ -4761,8 +4766,8 @@ export default class extends Evented {
         train.arrivalStation = train.arrivalTime = undefined;
     }
 
-    setBusSectionData(bus, index, final) {
-        return updateBusSection(bus, this.clock.getTimeOffset(), index, final);
+    setBusSectionData(bus, index, renderedDistance, onTick) {
+        return updateBusSection(bus, this.clock.getTimeOffset(), index, renderedDistance, onTick);
     }
 }
 

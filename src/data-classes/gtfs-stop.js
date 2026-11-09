@@ -20,6 +20,14 @@ export default class {
          * @type {Array<number>}
          */
         me.coord = params.coord;
+
+        if (params.color) {
+            /**
+             * Dominant rail route color of the stop, if any.
+             * @type {string}
+             */
+            me.color = params.color;
+        }
     }
 
 }

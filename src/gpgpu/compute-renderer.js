@@ -255,7 +255,7 @@ export default class {
         return {
             coord: coord.toLngLat(),
             altitude: coord.toAltitude(),
-            bearing: bearing + (sectionIndex < nextSectionIndex ? 0 : 180),
+            bearing: bearing + (objectType === 2 || sectionIndex < nextSectionIndex ? 0 : 180),
             _t: t
         };
     }

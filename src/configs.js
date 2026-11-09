@@ -103,8 +103,23 @@ const configs = {
         return configs.flightAccelerationKMPHPS / 3600000000;
     },
 
-    // Maximum bus speed in km/h
+    // Maximum bus speed in km/h (other GTFS vehicles, and timetable vehicles)
     maxBusSpeedKMPH: 30,
+
+    // Cruise speed of realtime GO trains (GTFS route type 2) in km/h.
+    // Metrolinx: GO trains "generally travel at about 95 km/h".
+    maxTrainSpeedKMPH: 95,
+
+    // Cruise speed of realtime GO buses (GTFS route type 3) in km/h
+    maxGoBusSpeedKMPH: 60,
+
+    // Realtime vehicles follow the speed observed between their last two GPS
+    // fixes (D5), instead of freezing when they run ahead of the GPS
+    speedMatching: true,
+
+    // Consecutive fresh GPS fixes more than 300 m behind the rendered position
+    // after which a realtime vehicle teleports back
+    behindTeleportFixes: 3,
 
     // Bus acceleration in km/h/s
     busAccelerationKMPHPS: 3,
