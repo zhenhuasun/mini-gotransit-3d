@@ -1,5 +1,6 @@
 import animation from '../animation';
 import configs from '../configs';
+import {getMoveDistances, getSectionT} from '../helpers/helpers-bus-motion';
 import ComputeRenderer from '../gpgpu/compute-renderer';
 import GlowPipeline from './glow/glow-pipeline';
 import {lerp} from '../helpers/helpers';
@@ -252,13 +253,14 @@ export default class {
             sectionIndex = 0;
             nextSectionIndex = 1;
         } else {
-            const {gtfsId, feature, offsets: stopOffsets, trip} = object;
+            const {gtfsId, feature, trip} = object,
+                [startDistance, endDistance] = getMoveDistances(object);
 
             objectType = 2;
             routeIndex = me.computeRenderer.getRouteIndex(`${gtfsId}.${feature.properties.id}`);
             colorIndex = me.computeRenderer.getColorIndex(`${gtfsId}.${trip.route}`);
-            sectionIndex = stopOffsets[object.sectionIndex];
-            nextSectionIndex = stopOffsets[object.sectionIndex + object.sectionLength];
+            sectionIndex = startDistance;
+            nextSectionIndex = endDistance;
             // GO delay level in seconds from TripUpdates: 1 = yellow
             // (3-14 min late), 2 = red (15+ min late), else no sphere.
             delay = object.delay >= 900 ? 2 : object.delay >= 180 ? 1 : 0;
@@ -282,10 +284,7 @@ export default class {
             sectionIndex = 0;
             nextSectionIndex = 1;
         } else {
-            const stopOffsets = object.offsets;
-
-            sectionIndex = stopOffsets[object.sectionIndex];
-            nextSectionIndex = stopOffsets[object.sectionIndex + object.sectionLength];
+            [sectionIndex, nextSectionIndex] = getMoveDistances(object);
         }
 
         me.computeRenderer.updateInstance(object.instanceID, sectionIndex, nextSectionIndex, timeOffset, duration, accelerationTime, normalizedAcceleration, decelerationTime, normalizedDeceleration);
@@ -294,7 +293,12 @@ export default class {
     }
 
     getObjectPosition(object) {
-        return this.computeRenderer.getInstancePosition(object.instanceID);
+        const position = this.computeRenderer.getInstancePosition(object.instanceID);
+
+        if (object.type !== 'train' && object.type !== 'flight') {
+            position._t = getSectionT(object, position._t);
+        }
+        return position;
     }
 
     removeObject(object) {

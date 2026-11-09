@@ -3,15 +3,17 @@
 // section the GPS says the vehicle is in (docs/issues/vehicle-motion-plan.md).
 //
 //   npm run replay-vp -- capture [--out dir] [--minutes 15]
-//   npm run replay-vp -- replay --dir dir [--legacy | --compare] [--trip id] [--route id]
+//   npm run replay-vp -- replay --dir dir [--legacy | --compare [--fail-on-mismatch]] [--trip id] [--route id]
 //       [--skip n] [--top n] [--report file.md] [--min-label-match pct] [--max-p95 km]
+//       [--train-speed kmph] [--bus-speed kmph]   (override maxTrainSpeedKMPH / maxGoBusSpeedKMPH)
+//       [--no-speed-match] [--behind-fixes n]     (override configs.speedMatching / behindTeleportFixes; D4 = --no-speed-match --behind-fixes 2)
 //
 // (npm run replay-vp runs Node with --use-system-ca, needed behind the
 // corporate TLS proxy, and --no-warnings.)
 //
 // The simulator drives the real motion helpers (src/helpers/helpers-bus-motion.js)
 // and the real ActiveObjectLookup scheduler. The glue around them (the VP
-// handler, busStart, busRepeat and the GPU texture interpolation) mirrors
+// handler, busStart, busRepeat and the GPU interpolation) mirrors
 // src/map.js and src/gpgpu/compute-renderer.js; keep it in sync when those
 // change. --legacy runs a frozen copy of the pre-refactor logic instead.
 
@@ -405,6 +407,17 @@ function makeTimeOffset(timezone) {
     };
 }
 
+// Service date (YYYYMMDD) at a time, through the same helper as the app
+function makeServiceDate(timezone) {
+    const format = new Intl.DateTimeFormat('en-CA', {timeZone: timezone, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit'});
+
+    return time => {
+        const p = Object.fromEntries(format.formatToParts(new Date(time)).map(({type, value}) => [type, value]));
+
+        return currentEngine.getServiceDate(`${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}:${p.second}`);
+    };
+}
+
 function formatOffset(offset) {
     const seconds = Math.round(offset / 1000) + 3 * 3600;
 
@@ -416,22 +429,35 @@ function formatOffset(offset) {
 // Simulator
 // ---------------------------------------------------------------------------
 
-// Distance along the shape drawn by the GPU for a vehicle, mirroring
-// compute-fragment.glsl / ComputeRenderer#getInstancePosition.
-function getRenderedPosition(texture, now) {
-    const {from, to, startTime, duration, accelerationTime, normalizedAcceleration} = texture,
-        elapsed = Math.min(Math.max(now - startTime, 0), duration),
-        left = Math.min(Math.max(startTime + duration - now, 0), duration);
-    let t;
+// Routes whose shapes loop back on themselves, so their stop offsets are unreliable (step C2)
+const LOOP_ROUTES = new Set(['25', '30', '16', '90']);
 
-    if (elapsed < accelerationTime) {
-        t = normalizedAcceleration / 2 * elapsed * elapsed;
-    } else if (left < accelerationTime) {
-        t = 1 - normalizedAcceleration / 2 * left * left;
-    } else {
-        t = normalizedAcceleration * accelerationTime * (elapsed - accelerationTime / 2);
-    }
-    return {distance: from + (to - from) * t, t};
+const ACTIONS = [
+    ['teleport', 'spawn teleports'],
+    ['teleportForward', 'forward teleports'],
+    ['teleportBack', 'back teleports'],
+    ['hold', 'holds'],
+    ['holdMid', 'holds between two stops (mid-section freezes)'],
+    ['slowDown', 'slow-downs (ahead of the GPS, kept moving)'],
+    ['catchUp', 'catch-ups'],
+    ['repeatedSkipped', 'repeated fixes skipped'],
+    ['staleIgnored', 'stale fixes ignored'],
+    ['restartFromRest', 'restart-from-rest while moving'],
+    ['gatedFutureAtOrigin', 'gated: future trip, GPS at origin'],
+    ['gatedFutureMoving', 'gated: future trip, GPS > 300 m from origin (early departure)'],
+    ['gatedLate', 'gated: past last time + LATE_TRIP_GRACE']
+];
+
+// A gated trip whose GPS is farther than this (km) from its origin has departed early
+const EARLY_DEPARTURE_KM = 0.3;
+
+function createActionCounters() {
+    return Object.fromEntries([...ACTIONS.map(([key]) => key), 'freshTicks', 'speedTicks'].map(key => [key, 0]));
+}
+
+// Mode of a vehicle for the per-mode counters: trains, buses excl. loops, loop routes
+function getMode(route) {
+    return route.type === 2 ? 'trains' : LOOP_ROUTES.has(route.shortName) ? 'loops' : 'buses';
 }
 
 class Simulator {
@@ -442,6 +468,51 @@ class Simulator {
         this.activeBusLookup = new ActiveObjectLookup();
         this.realtimeBuses = new Set();
         this.now = 0;
+        this.serviceDate = undefined;
+        this.earlyDepartures = new Map();
+        this.stopOffsetCache = new Map();
+        this.actions = createActionCounters();
+        this.actionsByMode = {trains: createActionCounters(), buses: createActionCounters(), loops: createActionCounters()};
+    }
+
+    // Counts the ACTIONS key returned by the planner, in total and for the mode of the vehicle
+    reportAction(bus, result, onTick) {
+        const keys = [];
+
+        if (result.action in this.actions) {
+            keys.push(result.action);
+        }
+        if (result.action === 'hold' && result.sectionLength === 1) {
+            keys.push('holdMid');
+        }
+        // Applied (not ignored) ticks, and those with an observed speed to match
+        if (onTick && result.action !== 'teleport') {
+            keys.push('freshTicks');
+            if (result.speedAvailable) {
+                keys.push('speedTicks');
+            }
+        }
+
+        const byMode = this.actionsByMode[getMode(this.gtfs.routes.get(bus.trip.route))];
+
+        for (const key of keys) {
+            this.actions[key]++;
+            byMode[key]++;
+        }
+    }
+
+    // Mirrors setBusSectionData; the current engine's realtime plan carries an action
+    updateSection(bus, index, renderedDistance, onTick) {
+        const {engine} = this,
+            // The frozen legacy engine removes vehicles in busRepeat (4th argument: final)
+            result = engine === legacyEngine && bus.stop !== undefined && index === undefined ?
+                engine.updateBusSection(bus, this.now, undefined, !this.realtimeBuses.has(bus.trip.id)) :
+                engine.updateBusSection(bus, this.now, index, renderedDistance, onTick);
+
+        if (result && result.action) {
+            this.reportAction(bus, result, onTick);
+        }
+        return result;
     }
 
     // Fires the busRepeat callbacks due up to time, each at its own deadline
@@ -476,10 +547,20 @@ class Simulator {
                 continue;
             }
 
+            const trip = gtfs.trips.get(tripId);
+
+            if (trip && engine !== legacyEngine) {
+                const state = engine.getServiceWindowState(trip, this.now, this.serviceDate);
+
+                if (state !== 'ok') {
+                    this.reportGated(trip, state, vp, vp.position && gtfs.features.get(trip.shape));
+                    activeBusLookup.delete(tripId);
+                    continue;
+                }
+            }
             realtimeBuses.add(tripId);
 
-            const trip = gtfs.trips.get(tripId),
-                feature = trip && gtfs.features.get(trip.shape),
+            const feature = trip && gtfs.features.get(trip.shape),
                 route = trip && gtfs.routes.get(trip.route);
 
             if (!trip || !feature || !route) {
@@ -500,52 +581,90 @@ class Simulator {
                     offset: 0
                 };
             }
-            engine.applyVehiclePosition(bus, vp, trip, feature);
+            engine.applyVehiclePosition(bus, vp, trip, feature,             Number(feed.header.timestamp), route.type);
             if (!isActive) {
                 this.busStart(bus);
+            } else if (engine !== legacyEngine) {
+                this.busRepeat(bus, undefined, true);
+            }
+        }
+
+        // The frozen legacy engine has no VP grace period
+        if (engine.getVanishedBuses) {
+            for (const bus of engine.getVanishedBuses(activeBusLookup.values(), realtimeBuses)) {
+                activeBusLookup.delete(bus.trip.id);
             }
         }
     }
 
+    // Counts a gated observation: future at the origin, future already moving, or past the late grace
+    reportGated(trip, state, vp, feature) {
+        let action = 'gatedLate';
+
+        if (state === 'early') {
+            let moved = false;
+
+            if (feature) {
+                if (!this.stopOffsetCache.has(trip.id)) {
+                    this.stopOffsetCache.set(trip.id, currentEngine.getStopOffsets(feature, trip.stops.map(stopId => this.gtfs.stops.get(stopId).coord)));
+                }
+                moved = currentEngine.snapToShape(feature, [vp.position.longitude, vp.position.latitude], 0) - this.stopOffsetCache.get(trip.id)[0] > EARLY_DEPARTURE_KM;
+            }
+            action = moved ? 'gatedFutureMoving' : 'gatedFutureAtOrigin';
+            if (moved) {
+                this.earlyDepartures.set(trip.id, (this.earlyDepartures.get(trip.id) || 0) + 1);
+            }
+        }
+        this.reportAction({trip}, {action}, false);
+    }
+
     // Mirrors busStart + TrafficLayer#addObject
     busStart(bus) {
-        if (!this.engine.updateBusSection(bus, this.now)) {
+        if (!this.updateSection(bus)) {
             return;
         }
         this.activeBusLookup.set(bus.trip.id, bus);
-        bus.texture = {
-            from: bus.offsets[bus.sectionIndex],
-            to: bus.offsets[bus.sectionIndex + bus.sectionLength],
-            startTime: 86400000,
-            duration: 0,
-            accelerationTime: 0,
-            normalizedAcceleration: 0
-        };
+        const [startDistance, endDistance] = currentEngine.getMoveDistances(bus);
+
+        bus.motion = {startDistance, endDistance, startTime: 86400000, duration: 0, accT: 0, accN: 0, decT: 0, decN: 0};
         this.busRepeat(bus);
     }
 
     // Mirrors busRepeat (src/map.js) in realtime mode (clock speed 1)
-    busRepeat(bus, index) {
-        const {engine, activeBusLookup, now} = this;
-        let final;
+    busRepeat(bus, index, onTick) {
+        const {engine, activeBusLookup, now} = this,
+            rendered = onTick && bus.motion ? currentEngine.getMotionDistance(bus.motion, now) : undefined,
+            plan = this.updateSection(bus, index, rendered && rendered.distance, onTick);
 
-        if (bus.stop === undefined) {
-            final = !engine.updateBusSection(bus, now, index);
-        } else {
-            final = !engine.updateBusSection(bus, now, undefined, !this.realtimeBuses.has(bus.trip.id));
+        if (plan && plan.ignore) {
+            return;
         }
 
-        const motion = !final && engine.getBusMotion(bus, now, index, 1);
+        const final = !plan,
+            routeType = this.gtfs.routes.get(bus.trip.route).type,
+            motion = !final && engine.getBusMotion(bus, now, index, 1, routeType, !!rendered &&             rendered.t > 0 && rendered.t < 1, plan.speedKMPH);
 
         if (motion) {
-            bus.texture = Object.assign({
-                from: bus.offsets[bus.sectionIndex],
-                to: bus.offsets[bus.sectionIndex + bus.sectionLength]
-            }, motion);
+            const [startDistance, endDistance] = currentEngine.getMoveDistances(bus);
+
+            bus.motion = {
+                startDistance, endDistance,
+                startTime: motion.startTime,
+                duration: motion.duration,
+                accT: motion.accelerationTime,
+                accN: motion.normalizedAcceleration,
+                decT: motion.decelerationTime === undefined ? motion.accelerationTime : motion.decelerationTime,
+                decN: motion.normalizedDeceleration === undefined ? motion.normalizedAcceleration : motion.normalizedDeceleration
+            };
             activeBusLookup.schedule(bus.trip.id, motion.startTime + motion.duration, () => {
                 this.busRepeat(bus, bus.stop === undefined ? bus.sectionIndex + 1 : undefined);
             });
         } else {
+            if (!final && bus.stop !== undefined && bus.startDistance !== undefined) {
+                const [startDistance, endDistance] = currentEngine.getMoveDistances(bus);
+
+                bus.motion = {startDistance, endDistance, startTime: now, duration: 0, accT: 0, accN: 0, decT: 0, decN: 0};
+            }
             activeBusLookup.schedule(bus.trip.id, now + engine.getBusWaitDuration(bus, now, final), () => {
                 if (final) {
                     activeBusLookup.delete(bus.trip.id);
@@ -563,10 +682,14 @@ class Simulator {
 // ---------------------------------------------------------------------------
 
 const STOP_TOLERANCE_KM = 0.2,
-    EARLY_GRACE = 2 * 60000,
-    LATE_GRACE = 60 * 60000,
     BACKWARD_KM = 0.05,
-    TELEPORT_KM = 2;
+    TELEPORT_KM = 2,
+    // Upper bounds (s) of the fix-age buckets
+    FIX_AGE_BUCKETS = [[15, '< 15 s'], [60, '15-60 s'], [90, '60-90 s'], [300, '90 s-5 min'], [Infinity, '> 5 min']];
+
+function getFixAgeBucket(age) {
+    return FIX_AGE_BUCKETS.findIndex(([limit]) => age < limit);
+}
 
 function getDelayAtStop(tuFeed, tripId, stopId) {
     if (!tuFeed) {
@@ -588,17 +711,28 @@ function getDelayAtStop(tuFeed, tripId, stopId) {
 function runReplay(engine, gtfs, vpSnapshots, tuSnapshots, options) {
     const simulator = new Simulator(engine, gtfs),
         toOffset = makeTimeOffset(gtfs.timezone),
+        serviceDate = makeServiceDate(gtfs.timezone),
         truthOffsets = new Map(),
         stopOffsetCache = new Map(),
         previous = new Map(),
+        lastFix = new Map(),
         observations = [],
-        events = {backward: 0, teleport: 0, disappear: 0, ghosts: 0};
+        events = {backward: 0, teleport: 0, disappear: 0, ghosts: 0},
+        jumps = {trains: 0, buses: 0, loops: 0};
     let tuIndex = -1;
 
     vpSnapshots.forEach(({timestamp, feed}, tick) => {
         const now = toOffset(timestamp);
 
         simulator.advanceTo(now);
+        simulator.serviceDate = serviceDate(timestamp);
+
+        // What the viewer saw at the moment the fix arrived
+        const preTick = new Map();
+
+        for (const bus of simulator.activeBusLookup.values()) {
+            preTick.set(bus.trip.id, currentEngine.getMotionDistance(bus.motion, now).distance);
+        }
         simulator.applyVehiclePositions(feed);
 
         while (tuIndex + 1 < tuSnapshots.length && tuSnapshots[tuIndex + 1].timestamp <= timestamp) {
@@ -631,15 +765,24 @@ function runReplay(engine, gtfs, vpSnapshots, tuSnapshots, options) {
 
             const offsets = stopOffsetCache.get(tripId),
                 truth = currentEngine.snapToShape(feature, [vp.position.longitude, vp.position.latitude], truthOffsets.get(tripId) || 0),
-                {departureTimes} = trip,
-                preDeparture = now < departureTimes[0] - EARLY_GRACE,
-                postArrival = now > departureTimes[departureTimes.length - 1] + LATE_GRACE,
+                windowState = currentEngine.getServiceWindowState(trip, now, serviceDate(timestamp)),
+                preDeparture = windowState === 'early',
+                postArrival = windowState === 'late',
                 expectedNext = currentEngine.getNextStopIndex(offsets, truth),
                 accepted = new Set([expectedNext]),
                 status = vp.currentStatus,
                 bus = simulator.activeBusLookup.get(tripId);
 
             truthOffsets.set(tripId, truth);
+
+            const fixTime = vp.timestamp ? Number(vp.timestamp) : undefined,
+                fixAge = fixTime ? Math.max(0, timestamp / 1000 - fixTime) : undefined,
+                repeated = fixTime !== undefined && lastFix.get(tripId) === fixTime,
+                preDistance = preTick.get(tripId);
+
+            if (fixTime) {
+                lastFix.set(tripId, fixTime);
+            }
 
             // Within the stop tolerance either side of a stop, the vehicle is
             // "at" that stop: its next stop may be that stop or the one after.
@@ -663,11 +806,14 @@ function runReplay(engine, gtfs, vpSnapshots, tuSnapshots, options) {
                 truth, expectedNext, preDeparture, postArrival,
                 expected: !preDeparture && !postArrival,
                 rendered: !!bus,
+                fixAge, repeated,
+                preError: preDistance === undefined ? undefined : preDistance - truth,
                 tuDelay: getDelayAtStop(tuFeed, tripId, trip.stops[expectedNext])
             };
 
             if (bus) {
-                const {distance, t} = getRenderedPosition(bus.texture, now),
+                const {distance, t: moveT} = currentEngine.getMotionDistance(bus.motion, now),
+                    t = currentEngine.getSectionT(bus, moveT),
                     standing = t === 0 || t === 1,
                     labelNext = bus.sectionIndex + (standing ? 0 : bus.sectionLength),
                     positionNext = currentEngine.getNextStopIndex(offsets, distance);
@@ -691,6 +837,7 @@ function runReplay(engine, gtfs, vpSnapshots, tuSnapshots, options) {
                     }
                     if (Math.abs(delta) > TELEPORT_KM) {
                         events.teleport++;
+                        jumps[getMode(route)]++;
                     }
                 }
             } else {
@@ -715,7 +862,7 @@ function runReplay(engine, gtfs, vpSnapshots, tuSnapshots, options) {
         }
     });
 
-    return {observations, events};
+    return {observations, events, jumps, actions: simulator.actions, actionsByMode: simulator.actionsByMode, earlyDepartures: simulator.earlyDepartures};
 }
 
 function percentile(values, p) {
@@ -732,6 +879,8 @@ function summarize(observations) {
     const inWindow = observations.filter(o => o.expected),
         rendered = inWindow.filter(o => o.rendered),
         errors = rendered.map(o => Math.abs(o.error)),
+        preErrors = inWindow.filter(o => o.preError !== undefined).map(o => Math.abs(o.preError)),
+        withFix = observations.filter(o => o.fixAge !== undefined),
         pct = (n, d) => d ? n / d * 100 : NaN;
 
     return {
@@ -750,7 +899,14 @@ function summarize(observations) {
         maxError: errors.length ? Math.max(...errors) : NaN,
         meanSignedError: rendered.reduce((a, o) => a + o.error, 0) / rendered.length,
         aheadOver1km: pct(rendered.filter(o => o.error > 1).length, rendered.length),
-        behindOver1km: pct(rendered.filter(o => o.error < -1).length, rendered.length)
+        behindOver1km: pct(rendered.filter(o => o.error < -1).length, rendered.length),
+        preCount: preErrors.length,
+        preMeanError: preErrors.reduce((a, b) => a + b, 0) / preErrors.length,
+        preP50Error: percentile(preErrors, 50),
+        preP95Error: percentile(preErrors, 95),
+        preAheadOver1km: pct(inWindow.filter(o => o.preError > 1).length, preErrors.length),
+        preBehindOver1km: pct(inWindow.filter(o => o.preError < -1).length, preErrors.length),
+        repeatedShare: pct(withFix.filter(o => o.repeated).length, withFix.length)
     };
 }
 
@@ -773,7 +929,8 @@ function summaryTable(rows) {
         ['maxError', 'max abs error km', 2],
         ['meanSignedError', 'mean signed error km (+ = ahead)', 2],
         ['aheadOver1km', 'ahead > 1 km %', 1],
-        ['behindOver1km', 'behind > 1 km %', 1]
+        ['behindOver1km', 'behind > 1 km %', 1],
+        ['repeatedShare', 'repeated fixes % (same fix timestamp)', 1]
     ];
 
     return [
@@ -789,17 +946,65 @@ function buildReport(name, result, gtfs, vpSnapshots, tuSnapshots, options) {
         lines = [],
         all = summarize(observations),
         trains = summarize(observations.filter(o => o.isTrain)),
-        buses = summarize(observations.filter(o => !o.isTrain));
+        buses = summarize(observations.filter(o => !o.isTrain)),
+        regularBuses = summarize(observations.filter(o => !o.isTrain && !LOOP_ROUTES.has(o.route))),
+        loopBuses = summarize(observations.filter(o => !o.isTrain && LOOP_ROUTES.has(o.route)));
 
     lines.push(`# VP replay: ${name} engine`, '');
+    lines.push(`- Cruise speeds: trains ${configs.maxTrainSpeedKMPH} km/h, GO buses ${configs.maxGoBusSpeedKMPH} km/h (the legacy engine ignores them)`);
     lines.push(`- Snapshots: ${vpSnapshots.length} VP, ${tuSnapshots.length} TU, ${formatOffset(toOffset(vpSnapshots[0].timestamp))} - ${formatOffset(toOffset(vpSnapshots[vpSnapshots.length - 1].timestamp))} (${gtfs.timezone})`);
     lines.push(`- Simulates a page loaded at the first snapshot; first ${options.skip} tick(s) excluded from stats.`);
     lines.push(`- Truth: GPS snapped to the trip shape. Service window: first departure - 2 min to last stop + 60 min. Stop tolerance ${STOP_TOLERANCE_KM} km.`);
     lines.push('');
     lines.push('## Summary', '');
-    lines.push(summaryTable([['all', all], ['trains', trains], ['buses', buses]]));
+    lines.push(summaryTable([['all', all], ['trains', trains], ['buses', buses], ['buses excl. loops', regularBuses], ['loop routes', loopBuses]]));
     lines.push('');
     lines.push(`Events: backward moves > ${BACKWARD_KM * 1000} m: ${events.backward}, jumps > ${TELEPORT_KM} km: ${events.teleport}, disappearances while still in VP: ${events.disappear}, rendered vehicles not in VP (vehicle x tick): ${events.ghosts}`);
+    lines.push('');
+
+    const groups = [
+        ['all', all, observations],
+        ['trains', trains, observations.filter(o => o.isTrain)],
+        ['buses', buses, observations.filter(o => !o.isTrain)],
+        ['buses excl. loops', regularBuses, observations.filter(o => !o.isTrain && !LOOP_ROUTES.has(o.route))],
+        ['loop routes', loopBuses, observations.filter(o => !o.isTrain && LOOP_ROUTES.has(o.route))]
+    ];
+
+    lines.push('## Pre-tick error (rendered distance when each fix arrives, before it is applied)', '');
+    lines.push(`| metric | ${groups.map(([name]) => name).join(' | ')} |`, `|---|${groups.map(() => '---:').join('|')}|`);
+    for (const [key, label, digits] of [['preCount', 'vehicles with a rendered position', 0], ['preMeanError', 'mean abs error km', 2], ['preP50Error', 'p50 abs error km', 2], ['preP95Error', 'p95 abs error km', 2], ['preAheadOver1km', 'ahead > 1 km %', 1], ['preBehindOver1km', 'behind > 1 km %', 1]]) {
+        lines.push(`| ${label} | ${groups.map(([, summary]) => fixed(summary[key], digits)).join(' | ')} |`);
+    }
+    lines.push('');
+
+    const modeColumns = [['all', result.actions], ['trains', result.actionsByMode.trains], ['buses excl. loops', result.actionsByMode.buses], ['loop routes', result.actionsByMode.loops]],
+        row = (label, values) => `| ${label} | ${values.join(' | ')} |`;
+
+    lines.push('## Actions', '', row('action', modeColumns.map(([name]) => name)), `|---|${modeColumns.map(() => '---:').join('|')}|`);
+    for (const [key, label] of ACTIONS) {
+        lines.push(row(label, modeColumns.map(([, counters]) => counters[key])));
+    }
+    lines.push(row('fresh ticks applied', modeColumns.map(([, counters]) => counters.freshTicks)));
+    lines.push(row('fresh ticks with an observed speed %', modeColumns.map(([, counters]) => fixed(counters.freshTicks ? counters.speedTicks / counters.freshTicks * 100 : NaN, 1))));
+    lines.push(row(`jumps > ${TELEPORT_KM} km between observations`, [result.events.teleport, result.jumps.trains, result.jumps.buses, result.jumps.loops]));
+    lines.push('');
+
+    if (result.earlyDepartures && result.earlyDepartures.size) {
+        lines.push(`Early departures (gated, GPS > ${EARLY_DEPARTURE_KM * 1000} m from origin): ${result.earlyDepartures.size} trips: ${Array.from(result.earlyDepartures, ([id, n]) => `${id} (${n})`).join(', ')}`, '');
+    }
+
+    lines.push('## Fix age (now - vehicle.timestamp), in service window', '');
+    lines.push('| mode | bucket | observations | share % | repeated % | pre-tick n | pre-tick p50 km | pre-tick p95 km |', '|---|---|---:|---:|---:|---:|---:|---:|');
+    for (const [mode, list] of [['trains', groups[1][2]], ['buses', groups[2][2]]]) {
+        const inWindow = list.filter(o => o.expected && o.fixAge !== undefined);
+
+        FIX_AGE_BUCKETS.forEach(([, label], index) => {
+            const bucket = inWindow.filter(o => getFixAgeBucket(o.fixAge) === index),
+                errors = bucket.filter(o => o.preError !== undefined).map(o => Math.abs(o.preError));
+
+            lines.push(`| ${mode} | ${label} | ${bucket.length} | ${fixed(inWindow.length ? bucket.length / inWindow.length * 100 : NaN, 1)} | ${fixed(bucket.length ? bucket.filter(o => o.repeated).length / bucket.length * 100 : NaN, 1)} | ${errors.length} | ${fixed(percentile(errors, 50))} | ${fixed(percentile(errors, 95))} |`);
+        });
+    }
     lines.push('');
 
     const byTrip = new Map();
@@ -872,6 +1077,19 @@ async function replay(args) {
             top: +(args.top || 20)
         };
 
+    if (args['train-speed']) {
+        configs.maxTrainSpeedKMPH = +args['train-speed'];
+    }
+    if (args['bus-speed']) {
+        configs.maxGoBusSpeedKMPH = +args['bus-speed'];
+    }
+    if (args['no-speed-match']) {
+        configs.speedMatching = false;
+    }
+    if (args['behind-fixes']) {
+        configs.behindTeleportFixes = +args['behind-fixes'];
+    }
+
     if (!vpSnapshots.length) {
         throw new Error(`no vp-*.pb snapshots in ${dir}`);
     }
@@ -913,7 +1131,7 @@ async function replay(args) {
         const {compared, mismatches} = compareResults(results[0][1], results[1][1]);
 
         output.push('## Legacy vs current', '', `${compared} observations compared, ${mismatches} mismatches.`, '');
-        if (mismatches) {
+        if (mismatches && args['fail-on-mismatch']) {
             failed = true;
         }
     }
@@ -943,7 +1161,7 @@ async function main() {
         await replay(args);
     } else {
         console.log('usage: replay-vp.mjs capture [--out dir] [--minutes 15]\n' +
-            '       replay-vp.mjs replay --dir dir [--legacy | --compare] [--trip id] [--route id] [--skip n] [--top n] [--report file.md] [--min-label-match pct] [--max-p95 km]');
+            '       replay-vp.mjs replay --dir dir [--legacy | --compare [--fail-on-mismatch]] [--trip id] [--route id] [--skip n] [--top n] [--report file.md] [--min-label-match pct] [--max-p95 km]');
         process.exitCode = 1;
     }
 }

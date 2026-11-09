@@ -281,11 +281,13 @@ class StopReader {
             me.stopNameIndex = fields.indexOf('stop_name');
             me.stopLatIndex = fields.indexOf('stop_lat');
             me.stopLonIndex = fields.indexOf('stop_lon');
+            me.parentStationIndex = fields.indexOf('parent_station');
         } else {
             me.array.push({
                 id: fields[me.stopIdIndex],
                 name: fields[me.stopNameIndex],
-                coord: [+fields[me.stopLonIndex], +fields[me.stopLatIndex]]
+                coord: [+fields[me.stopLonIndex], +fields[me.stopLatIndex]],
+                parentStation: fields[me.parentStationIndex] || undefined
             });
         }
     }
@@ -500,13 +502,64 @@ function getFeatureCollection(shapes, stops, translations) {
     return featureCollection(features);
 }
 
-function getStops(stops, translations) {
+// Dominant rail route color per stop, counted over every trip in the feed
+// (not just today's services) so it never depends on the clock or on which
+// lines are running. Platforms vote for their parent station as well.
+function getStopColors(stops, routes, trips, stopTimeLookup) {
+    const routeColors = new Map(),
+        parents = new Map(),
+        votes = new Map(),
+        colors = new Map();
+
+    for (const {id, color, type} of routes) {
+        if (type === 2 && color) {
+            routeColors.set(id, color);
+        }
+    }
+    for (const {id, parentStation} of stops) {
+        if (parentStation) {
+            parents.set(id, parentStation);
+        }
+    }
+    for (const {id, route} of trips) {
+        const color = routeColors.get(route),
+            stopTimes = stopTimeLookup.get(id);
+
+        if (!color || !stopTimes) {
+            continue;
+        }
+        for (const stopId of new Set(stopTimes.stops)) {
+            for (const target of new Set([stopId, parents.get(stopId)])) {
+                if (target) {
+                    const stopVotes = votes.get(target) || votes.set(target, new Map()).get(target);
+
+                    stopVotes.set(color, (stopVotes.get(color) || 0) + 1);
+                }
+            }
+        }
+    }
+    for (const [stopId, stopVotes] of votes) {
+        let best, bestCount = 0;
+
+        for (const [color, count] of stopVotes) {
+            if (count > bestCount) {
+                best = color;
+                bestCount = count;
+            }
+        }
+        colors.set(stopId, best);
+    }
+    return colors;
+}
+
+function getStops(stops, translations, stopColors) {
     return stops.map(({id, name, coord}) => ({
         id,
         name: translations ?
             translations.get(`stops.stop_name.${id}`) || translations.get(`stops.stop_name.${name}`) || name :
             name,
-        coord
+        coord,
+        color: stopColors.get(id)
     }));
 }
 
@@ -709,7 +762,7 @@ function loadGtfs(source, now, lang) {
                 agency: agency.name,
                 timezone,
                 version: results.feed_info ? results.feed_info.version : 'N/A',
-                stops: getStops(results.stops, translations),
+                stops: getStops(results.stops, translations, getStopColors(results.stops, results.routes, results.trips, results.stop_times)),
                 routes: getRoutes(results.routes, results.trips, translations),
                 trips: getTrips(results.trips, services, serviceExceptions, results.stop_times, translations)
             };

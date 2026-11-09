@@ -21,6 +21,11 @@ function cleanDestination(headsign) {
     return dest || headsign;
 }
 
+// Legacy API code for Georgetown, now the Kitchener (KI) corridor.
+function normalizeLine(line) {
+    return line === 'GT' ? 'KI' : line;
+}
+
 function toMinutes(hhmm) {
     if (!hhmm || hhmm.indexOf(':') < 0) {
         return null;
@@ -145,7 +150,7 @@ export default class extends Panel {
         if (nextRows) {
             // NextService rows are authoritative for this stop.
             rows = nextRows.map(d => ({
-                line: d.line,
+                line: normalizeLine(d.line),
                 destination: d.dest,
                 scheduled: d.scheduled || '',
                 expected: d.expected || d.time || '',
@@ -175,7 +180,7 @@ export default class extends Panel {
                 unionRows.filter(isBusRow);
             if (modeRows.length) {
                 rows = modeRows.map(d => ({
-                    line: d.service || d.line || '',
+                    line: normalizeLine(d.service || d.line || ''),
                     // Info is a boarding instruction ('Proceed / Avancez'),
                     // not the destination — the destination is the last
                     // stop served, in travel order.

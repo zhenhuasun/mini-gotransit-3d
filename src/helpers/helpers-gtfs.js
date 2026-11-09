@@ -5,6 +5,7 @@ export function encode(data, pbf) {
             pbf.writeStringField(1, obj.id);
             pbf.writeStringField(2, obj.name);
             pbf.writePackedDouble(3, obj.coord);
+            if (obj.color) pbf.writeStringField(4, obj.color);
         }, stop);
     }
     for (const route of data.routes) {
@@ -47,6 +48,7 @@ export function decode(pbf) {
             if (tag === 1) obj.id = pbf.readString();
             else if (tag === 2) obj.name = pbf.readString();
             else if (tag === 3) obj.coord = pbf.readPackedDouble();
+            else if (tag === 4) obj.color = pbf.readString();
         }, {}, pbf.readVarint() + pbf.pos));
         if (tag === 3) obj.routes.push(pbf.readFields((tag, obj, pbf) => {
             if (tag === 1) obj.id = pbf.readString();
