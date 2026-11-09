@@ -19,7 +19,7 @@ import * as helpersMapbox from './helpers/helpers-mapbox';
 import * as helpersWebgl from './helpers/helpers-webgl';
 import {GeoJsonLayer, GlowCompositeLayer, RailwayStatusGlowLayer, STROKE_WIDTH_SCALE_STOPS, StationGlowLayer, ThreeLayer, Tile3DLayer, TrafficLayer, ZoomWidthScaleExtension} from './layers';
 import {isExpired, loadBusData, loadDictionary, loadDynamicBusData, loadDynamicFlightData, loadDynamicTrainData, loadStaticData, loadTimetableData, updateOdptUrl} from './loader';
-import {AboutPanel, BusPanel, DelayDashboardPanel, DepartureBoardPanel, LayerPanel, SharePanel, StationPanel, TrackingModePanel, TrainPanel} from './panels';
+import {AboutPanel, BusPanel, DelayDashboardPanel, DepartureBoardPanel, GoLayerPanel, LayerPanel, SharePanel, StationPanel, TrackingModePanel, TrainPanel} from './panels';
 import Plugin from './plugin';
 
 const RAILWAY_NAMBOKU = 'TokyoMetro.Namboku',
@@ -1180,6 +1180,7 @@ export default class extends Evented {
         }]));
 
         me.layerPanel = new LayerPanel({layers: me.plugins});
+        me.goLayerPanel = new GoLayerPanel();
         me.trackingModePanel = new TrackingModePanel();
         me.aboutPanel = new AboutPanel();
 
@@ -1188,7 +1189,7 @@ export default class extends Evented {
                 className: 'mapboxgl-ctrl-layers',
                 title: dict['select-layers'],
                 eventHandler() {
-                    me.layerPanel.addTo(me);
+                    me.goLayerPanel.addTo(me);
                 }
             }, {
                 className: 'mapboxgl-ctrl-tracking-mode',
@@ -4601,6 +4602,35 @@ export default class extends Evented {
         }
         delete me.lastRefresh;
         delete me.lastRealtimeCheck;
+    }
+
+    setGoGroupVisible(gtfsId, routeType, visible) {
+        const me = this,
+            gtfs = me.gtfs.get(gtfsId);
+
+        if (!gtfs) {
+            return;
+        }
+        for (const route of gtfs.routes.getAll()) {
+            if (route.type === routeType) {
+                route.hidden = !visible;
+            }
+        }
+        me.updateBusRouteVisibility();
+    }
+
+    isGoGroupVisible(gtfsId, routeType) {
+        const gtfs = this.gtfs.get(gtfsId);
+
+        if (!gtfs) {
+            return true;
+        }
+        for (const route of gtfs.routes.getAll()) {
+            if (route.type === routeType && route.hidden) {
+                return false;
+            }
+        }
+        return true;
     }
 
     updateBusRouteHighlight(gtfsId, routeId) {

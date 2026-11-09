@@ -2,6 +2,7 @@ export {default as AboutPanel} from './about-panel';
 export {default as BusPanel} from './bus-panel';
 export {default as DelayDashboardPanel} from './delay-dashboard-panel';
 export {default as DepartureBoardPanel} from './departure-board-panel';
+export {default as GoLayerPanel} from './go-layer-panel';
 export {default as LayerPanel} from './layer-panel';
 export {default as Panel} from './panel';
 export {default as SharePanel} from './share-panel';
