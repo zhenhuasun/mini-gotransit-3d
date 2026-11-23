@@ -1336,6 +1336,59 @@
 .mini-tokyo-3d .layer-icon:hover {
     background-color: rgba(51, 51, 51, 0.7);
 }
+.mini-tokyo-3d .go-layer-group {
+    margin-bottom: 12px;
+}
+.mini-tokyo-3d .go-layer-group-header,
+.mini-tokyo-3d .go-layer-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 4px;
+    border-radius: 4px;
+    cursor: pointer;
+    user-select: none;
+}
+.mini-tokyo-3d .go-layer-group-header {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.3);
+    font-weight: bold;
+    font-size: 15px;
+}
+.mini-tokyo-3d .go-layer-group-header:hover,
+.mini-tokyo-3d .go-layer-row:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+.mini-tokyo-3d .go-layer-title,
+.mini-tokyo-3d .go-layer-name {
+    flex: 1;
+    text-align: left;
+}
+.mini-tokyo-3d .go-layer-badge {
+    flex: none;
+    width: 34px;
+    height: 20px;
+    border-radius: 4px;
+    text-align: center;
+    font-size: 13px;
+    font-weight: bold;
+    line-height: 20px;
+}
+.mini-tokyo-3d .go-layer-check {
+    flex: none;
+    width: 16px;
+    height: 16px;
+    border: 2px solid #33B5E5;
+    border-radius: 3px;
+    background: #33B5E5 no-repeat center/12px svg-load('../../node_modules/@fortawesome/fontawesome-free/svgs/solid/check.svg', fill: #fff);
+}
+.mini-tokyo-3d .go-layer-off .go-layer-check {
+    border-color: #777;
+    background: none;
+}
+.mini-tokyo-3d .go-layer-row.go-layer-off .go-layer-badge,
+.mini-tokyo-3d .go-layer-row.go-layer-off .go-layer-name {
+    opacity: 0.4;
+}
 .mini-tokyo-3d .tracking-mode-row {
     height: 60px;
 }

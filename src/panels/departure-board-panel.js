@@ -34,6 +34,32 @@ function toMinutes(hhmm) {
     return (+h) * 60 + (+m);
 }
 
+const MINUTES_PER_DAY = 1440,
+    // Rows up to this many minutes before now are still "just departed",
+    // not tomorrow's departures.
+    PAST_TOLERANCE_MIN = 180;
+
+// Minutes from nowMin to an HH:MM clock time, wrapping across midnight:
+// at 23:50, '00:10' is +20 and '23:45' is -5. Live rows carry only HH:MM,
+// so sorting them as strings or raw minutes puts post-midnight departures
+// ('00:10') ahead of pre-midnight ones ('23:50').
+function minutesFromNow(hhmm, nowMin) {
+    const min = toMinutes(hhmm);
+
+    if (min === null) {
+        return Infinity;
+    }
+    const diff = ((min - nowMin) % MINUTES_PER_DAY + MINUTES_PER_DAY) % MINUTES_PER_DAY;
+
+    return diff > MINUTES_PER_DAY - PAST_TOLERANCE_MIN ? diff - MINUTES_PER_DAY : diff;
+}
+
+// Signed difference b - a in minutes, wrapped to [-720, 720) so a 23:58
+// departure expected at 00:03 is 5 minutes late, not 1435 minutes early.
+function wrappedDiff(a, b) {
+    return ((b - a) % MINUTES_PER_DAY + MINUTES_PER_DAY * 1.5) % MINUTES_PER_DAY - MINUTES_PER_DAY / 2;
+}
+
 function workerOrigin(gtfs) {
     try {
         return new URL(gtfs.vehiclePositionUrl).origin;
@@ -215,7 +241,16 @@ export default class extends Panel {
             }
         }
 
-        rows = rows.slice(0, MAX_ROWS);
+        const now = map.clock.getDate(),
+            nowMin = now.getHours() * 60 + now.getMinutes();
+
+        // Order by actual departure (expected, else scheduled) relative to
+        // now; the stable sort keeps source order for equal times.
+        rows = rows
+            .map((row, index) => ({row, index, key: minutesFromNow(row.expected || row.scheduled, nowMin)}))
+            .sort((a, b) => a.key - b.key || a.index - b.index)
+            .map(({row}) => row)
+            .slice(0, MAX_ROWS);
         me.setTitle(`${stopName} Departures`);
         me.setHTML([
             '<div style="padding:8px 12px;opacity:.7">',
@@ -236,9 +271,11 @@ export default class extends Panel {
                 if (/cancel/i.test(row.status || '')) {
                     expectedHTML = '<span style="color:#ff6b6b">Cancelled</span>';
                 } else if (schedMin !== null && expMin !== null) {
-                    if (expMin === schedMin) {
+                    const delay = wrappedDiff(schedMin, expMin);
+
+                    if (delay === 0) {
                         expectedHTML = '<span style="color:#0a0">On Time</span>';
-                    } else if (expMin > schedMin) {
+                    } else if (delay > 0) {
                         expectedHTML = `<span style="color:#ff6b6b">${row.expected}</span>`;
                     } else {
                         expectedHTML = `<span style="color:#06c">${row.expected}</span>`;
