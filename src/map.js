@@ -19,7 +19,7 @@ import * as helpersMapbox from './helpers/helpers-mapbox';
 import * as helpersWebgl from './helpers/helpers-webgl';
 import {GeoJsonLayer, GlowCompositeLayer, RailwayStatusGlowLayer, STROKE_WIDTH_SCALE_STOPS, StationGlowLayer, ThreeLayer, Tile3DLayer, TrafficLayer, ZoomWidthScaleExtension} from './layers';
 import {isExpired, loadBusData, loadDictionary, loadDynamicBusData, loadDynamicFlightData, loadDynamicTrainData, loadStaticData, loadTimetableData, updateOdptUrl} from './loader';
-import {AboutPanel, BusPanel, DelayDashboardPanel, DepartureBoardPanel, LayerPanel, SharePanel, StationPanel, TrackingModePanel, TrainPanel} from './panels';
+import {AboutPanel, BusPanel, DelayDashboardPanel, DepartureBoardPanel, GoLayerPanel, SharePanel, StationPanel, TrackingModePanel, TrainPanel} from './panels';
 import Plugin from './plugin';
 
 const RAILWAY_NAMBOKU = 'TokyoMetro.Namboku',
@@ -186,6 +186,8 @@ export default class extends Evented {
         // separately from me.gtfs (which is only populated once loading finishes)
         // so overlapping refreshBusData calls don't load the same source twice.
         me.gtfsLoading = new Set();
+        // '<gtfsId>.<route short name>' of GO routes turned off in the layer panel.
+        me.hiddenGoRoutes = new Set();
 
         Promise.all([
             loadDictionary(me.lang)
@@ -1179,7 +1181,7 @@ export default class extends Evented {
             }
         }]));
 
-        me.layerPanel = new LayerPanel({layers: me.plugins});
+        me.layerPanel = new GoLayerPanel();
         me.trackingModePanel = new TrackingModePanel();
         me.aboutPanel = new AboutPanel();
 
@@ -2706,6 +2708,7 @@ export default class extends Evented {
                     const properties = feature.properties;
 
                     if (properties.type === 0) {
+                        properties.stateId = getShapeStateId(properties.id);
                         featureLookup.set(properties.id, feature);
                         routeData.push({id: `${id}.${properties.id}`, feature});
                     }
@@ -2738,6 +2741,7 @@ export default class extends Evented {
                         color: route.color || source.color
                     }))
                 );
+                me.applyGoRouteHidden(me.gtfs.get(id));
 
                 // Build the station search index from GTFS stops. The datalist
                 // and stationTitleLookup are otherwise only populated from
@@ -2763,7 +2767,7 @@ export default class extends Evented {
                 map.addSource(id, {
                     type: 'geojson',
                     data: featureCollection,
-                    promoteId: 'id'
+                    promoteId: 'stateId'
                 });
 
                 for (const key of ['busroute', 'busroute-highlighted']) {
@@ -2966,6 +2970,9 @@ export default class extends Evented {
                     }
                 }
                 me.refreshMap();
+                if (me.hiddenGoRoutes.size) {
+                    me.updateBusRouteVisibility();
+                }
 
                 if (me.searchMode === 'none') {
                     if (me.clockMode === 'playback') {
@@ -4584,8 +4591,10 @@ export default class extends Evented {
                     }
                 }
             }
-            for (const id of gtfs.featureLookup.keys()) {
-                if (shapes.has(id)) {
+            for (const shape of gtfs.featureLookup.keys()) {
+                const id = getShapeStateId(shape);
+
+                if (shapes.has(shape)) {
                     map.removeFeatureState({source, id}, 'hidden');
                 } else {
                     map.setFeatureState({source, id}, {hidden: true});
@@ -4601,6 +4610,78 @@ export default class extends Evented {
         }
         delete me.lastRefresh;
         delete me.lastRealtimeCheck;
+        if (me.delayDashboardPanel && me.delayDashboardPanel.isOpen()) {
+            me.delayDashboardPanel.updateContent();
+        }
+    }
+
+    // Layer-panel visibility of GO routes. Choices are keyed by route short
+    // name, not route_id: a feed can carry several versions of one route
+    // ('09261126-LW', '11260127-LW'), and the version prefix changes when
+    // the GTFS is reloaded. They last for the session only.
+    getGoRouteKey(route) {
+        return route.shortName || route.id;
+    }
+
+    applyGoRouteHidden(gtfs) {
+        const me = this;
+
+        for (const route of gtfs.routes.getAll()) {
+            route.hidden = me.hiddenGoRoutes.has(`${gtfs.id}.${me.getGoRouteKey(route)}`);
+        }
+    }
+
+    isGoRouteHidden(gtfsId, routeKey) {
+        return this.hiddenGoRoutes.has(`${gtfsId}.${routeKey}`);
+    }
+
+    setGoRoutesVisible(gtfsId, routeKeys, visible) {
+        const me = this,
+            gtfs = me.gtfs.get(gtfsId);
+
+        if (!gtfs) {
+            return;
+        }
+        for (const routeKey of routeKeys) {
+            if (visible) {
+                me.hiddenGoRoutes.delete(`${gtfsId}.${routeKey}`);
+            } else {
+                me.hiddenGoRoutes.add(`${gtfsId}.${routeKey}`);
+            }
+        }
+        me.applyGoRouteHidden(gtfs);
+        me.updateBusRouteVisibility();
+    }
+
+    toggleGoRoute(gtfsId, routeKey) {
+        this.setGoRoutesVisible(gtfsId, [routeKey], this.isGoRouteHidden(gtfsId, routeKey));
+    }
+
+    // One entry per route key of the given GTFS route type, using the first
+    // route version found for its name and color.
+    getGoRoutesOfType(gtfsId, routeType) {
+        const me = this,
+            gtfs = me.gtfs.get(gtfsId),
+            routes = new Map();
+
+        if (gtfs) {
+            for (const route of gtfs.routes.getAll()) {
+                const key = me.getGoRouteKey(route);
+
+                if (route.type === routeType && !routes.has(key)) {
+                    routes.set(key, route);
+                }
+            }
+        }
+        return routes;
+    }
+
+    isGoGroupAllVisible(gtfsId, routeType) {
+        return [...this.getGoRoutesOfType(gtfsId, routeType).keys()].every(key => !this.isGoRouteHidden(gtfsId, key));
+    }
+
+    setGoGroupVisible(gtfsId, routeType, visible) {
+        this.setGoRoutesVisible(gtfsId, this.getGoRoutesOfType(gtfsId, routeType).keys(), visible);
     }
 
     updateBusRouteHighlight(gtfsId, routeId) {
@@ -4611,13 +4692,13 @@ export default class extends Evented {
             const gtfs = me.gtfs.get(gtfsId),
                 route = gtfs.routes.get(routeId);
 
-            for (const id of route.shapes) {
-                map.setFeatureState({source: gtfsId, id}, {'route-highlight': route.color || gtfs.color});
+            for (const shape of route.shapes) {
+                map.setFeatureState({source: gtfsId, id: getShapeStateId(shape)}, {'route-highlight': route.color || gtfs.color});
             }
         } else {
             for (const gtfs of me.gtfs.values()) {
-                for (const id of gtfs.featureLookup.keys()) {
-                    map.removeFeatureState({source: gtfs.id, id}, 'route-highlight');
+                for (const shape of gtfs.featureLookup.keys()) {
+                    map.removeFeatureState({source: gtfs.id, id: getShapeStateId(shape)}, 'route-highlight');
                 }
             }
         }
@@ -4628,10 +4709,11 @@ export default class extends Evented {
             {map, markedObject, trackedObject} = me,
             {gtfsId, trip} = object,
             source = gtfsId,
-            id = trip.shape;
+            shape = trip.shape,
+            id = getShapeStateId(shape);
 
-        if ((markedObject && markedObject.type === 'bus' && markedObject.gtfsId === gtfsId && markedObject.trip.shape === id) ||
-            (trackedObject && trackedObject.type === 'bus' && trackedObject.gtfsId === gtfsId && trackedObject.trip.shape === id)) {
+        if ((markedObject && markedObject.type === 'bus' && markedObject.gtfsId === gtfsId && markedObject.trip.shape === shape) ||
+            (trackedObject && trackedObject.type === 'bus' && trackedObject.gtfsId === gtfsId && trackedObject.trip.shape === shape)) {
             const gtfs = me.gtfs.get(gtfsId),
                 color = gtfs.routes.get(trip.route).color;
 
@@ -4926,6 +5008,14 @@ function getLayerZoom(zoom) {
 // function getObjectScale(zoom) {
 //     return Math.pow(2, 14 - helpers.clamp(zoom, 13, 19));
 // }
+
+// Feature-state id of a GTFS shape feature. Mapbox stores state for a
+// numeric-looking string id (GO bus shapes are "453382") but never paints
+// it, so state-driven styling silently fails for buses while alphanumeric
+// rail shape ids ("UNOA") work. A non-numeric prefix avoids that.
+function getShapeStateId(shape) {
+    return `shape:${shape}`;
+}
 
 function isVehicle(object) {
     return object && helpers.includes(['train', 'flight', 'bus'], object.type);

@@ -1,5 +1,29 @@
 import Panel from './panel';
 
+const ROUTE_TYPE_TRAIN = 2,
+    ROUTE_TYPE_BUS = 3;
+
+function compareRoutes(a, b) {
+    const aNum = parseInt(a.shortName, 10),
+        bNum = parseInt(b.shortName, 10);
+
+    if (!isNaN(aNum) && !isNaN(bNum) && aNum !== bNum) {
+        return aNum - bNum;
+    }
+    return (a.shortName || '').localeCompare(b.shortName || '');
+}
+
+function cssColor(color, fallback) {
+    if (!color) {
+        return fallback;
+    }
+    return color.charAt(0) === '#' ? color : `#${color}`;
+}
+
+/**
+ * Layer panel for GO Transit: per-route visibility of GO Train corridors
+ * and GO Bus routes (route shapes and their vehicles together).
+ */
 export default class extends Panel {
 
     constructor(options) {
@@ -12,117 +36,76 @@ export default class extends Panel {
     addTo(map) {
         const me = this;
 
-        super.addTo(map).setTitle('Layers');
+        super.addTo(map).setTitle(map.dict['layers'] || 'Layers');
         me.render(map);
         return me;
     }
 
     render(map) {
-        const me = this;
-
+        const me = this,
+            container = me._container;
         let html = '';
 
-        for (const gtfs of map.gtfs.values()) {
-            const trains = [],
-                buses = [];
+        for (const gtfsId of map.gtfs.keys()) {
+            html += me.groupHTML(map, gtfsId, 'GO Train', ROUTE_TYPE_TRAIN);
+            html += me.groupHTML(map, gtfsId, 'GO Bus', ROUTE_TYPE_BUS);
+        }
+        me.setHTML(html || '<div class="go-layer-empty">No routes loaded yet.</div>');
 
-            for (const route of gtfs.routes.getAll()) {
-                if (route.type === 2) {
-                    trains.push(route);
-                } else if (route.type === 3) {
-                    buses.push(route);
-                }
+        container.querySelector('#panel-content').addEventListener('click', e => {
+            const row = e.target.closest('[data-gtfs]');
+
+            if (!row) {
+                return;
             }
-            trains.sort((a, b) => a.shortName.localeCompare(b.shortName));
-            buses.sort((a, b) => a.shortName.localeCompare(b.shortName));
-            html += me.groupHTML(map, gtfs.id, 'GO Train', 2, trains);
-            html += me.groupHTML(map, gtfs.id, 'GO Bus', 3, buses);
-        }
-        if (!html) {
-            html = '<div class="go-layer-row">No routes loaded yet.</div>';
-        }
-        html += [
-            '<div class="go-layer-group">',
-            '<div class="go-layer-group-header">Live Camera</div>',
-            `<div class="go-layer-row go-layer-cam-row${map.isGoCamsEnabled() ? '' : ' go-layer-off'}">`,
-            '<svg width="18" height="18" viewBox="0 0 24 24"><path d="M4 7h3l2-2h6l2 2h3v12H4z" fill="#00a6ff"/><circle cx="12" cy="13" r="3.5" fill="#fff"/></svg>',
-            '<span class="go-layer-name">Live Camera</span>',
-            `<span class="go-layer-cam-count">${me.camCountText(map)}</span>`,
-            '</div>',
-            '</div>'
-        ].join('');
+            const {gtfs: gtfsId, route: routeId} = row.dataset,
+                routeType = +row.dataset.type;
 
-        me.setHTML(html);
-
-        const container = me._container;
-
-        container.querySelectorAll('.go-layer-toggle-all').forEach(element => {
-            element.addEventListener('click', () => {
-                const gtfsId = element.dataset.gtfs,
-                    routeType = +element.dataset.type,
-                    group = element.closest('.go-layer-group');
-
-                map.setGoGroupVisible(gtfsId, routeType, !map.isGoGroupAllVisible(gtfsId, routeType));
-                group.querySelectorAll('.go-layer-route-row').forEach(row => {
-                    row.classList.toggle('go-layer-off', map.isGoRouteHidden(row.dataset.gtfs, row.dataset.route));
-                });
-                element.classList.toggle('go-layer-off', !map.isGoGroupAllVisible(gtfsId, routeType));
-            });
-        });
-        container.querySelectorAll('.go-layer-route-row').forEach(element => {
-            element.addEventListener('click', () => {
-                const gtfsId = element.dataset.gtfs,
-                    routeId = element.dataset.route,
-                    routeType = +element.dataset.type,
-                    group = element.closest('.go-layer-group');
-
+            if (routeId) {
                 map.toggleGoRoute(gtfsId, routeId);
-                element.classList.toggle('go-layer-off', map.isGoRouteHidden(gtfsId, routeId));
-                group.querySelector('.go-layer-toggle-all').classList.toggle('go-layer-off', !map.isGoGroupAllVisible(gtfsId, routeType));
-            });
-        });
-        container.querySelector('.go-layer-cam-row').addEventListener('click', () => {
-            map.toggleGoCams();
-            container.querySelector('.go-layer-cam-row').classList.toggle('go-layer-off', !map.isGoCamsEnabled());
+            } else {
+                map.setGoGroupVisible(gtfsId, routeType, !map.isGoGroupAllVisible(gtfsId, routeType));
+            }
+            me.syncClasses(map);
         });
         return me;
     }
 
-    groupHTML(map, gtfsId, title, routeType, routes) {
+    syncClasses(map) {
+        const container = this._container;
+
+        if (!container) {
+            return;
+        }
+        for (const element of container.querySelectorAll('.go-layer-route-row')) {
+            element.classList.toggle('go-layer-off', map.isGoRouteHidden(element.dataset.gtfs, element.dataset.route));
+        }
+        for (const element of container.querySelectorAll('.go-layer-toggle-all')) {
+            element.classList.toggle('go-layer-off', !map.isGoGroupAllVisible(element.dataset.gtfs, +element.dataset.type));
+        }
+    }
+
+    groupHTML(map, gtfsId, title, routeType) {
+        const routes = [...map.getGoRoutesOfType(gtfsId, routeType)].sort((a, b) => compareRoutes(a[1], b[1]));
+
         if (!routes.length) {
             return '';
         }
-        const allVisible = map.isGoGroupAllVisible(gtfsId, routeType);
-
         return [
             '<div class="go-layer-group">',
-            `<div class="go-layer-group-header">${title}</div>`,
-            `<div class="go-layer-row go-layer-toggle-all${allVisible ? '' : ' go-layer-off'}" data-gtfs="${gtfsId}" data-type="${routeType}">Toggle All</div>`,
-            ...routes.map(route => {
-                const hidden = map.isGoRouteHidden(gtfsId, route.id);
-
-                return `<div class="go-layer-row go-layer-route-row${hidden ? ' go-layer-off' : ''}" data-gtfs="${gtfsId}" data-route="${route.id}" data-type="${routeType}"><span class="go-layer-badge" style="background-color: ${route.color || '#666'};${route.textColor ? `color: ${route.textColor};` : ''}">${route.shortName}</span><span class="go-layer-name">${route.longName}</span></div>`;
-            }),
+            `<div class="go-layer-group-header go-layer-toggle-all${map.isGoGroupAllVisible(gtfsId, routeType) ? '' : ' go-layer-off'}" data-gtfs="${gtfsId}" data-type="${routeType}">`,
+            `<span class="go-layer-title">${title}</span>`,
+            '<span class="go-layer-check"></span>',
+            '</div>',
+            ...routes.map(([key, route]) => [
+                `<div class="go-layer-row go-layer-route-row${map.isGoRouteHidden(gtfsId, key) ? ' go-layer-off' : ''}" data-gtfs="${gtfsId}" data-route="${key}" data-type="${routeType}">`,
+                `<span class="go-layer-badge" style="background-color: ${cssColor(route.color, '#666')}; color: ${cssColor(route.textColor, '#fff')};">${route.shortName}</span>`,
+                `<span class="go-layer-name">${route.longName || ''}</span>`,
+                '<span class="go-layer-check"></span>',
+                '</div>'
+            ].join('')),
             '</div>'
         ].join('');
-    }
-
-    camCountText(map) {
-        const live = map.liveCamIds;
-
-        if (!live || map.liveCamTotal === undefined) {
-            return '';
-        }
-        return `${live.length} of ${map.liveCamTotal} live`;
-    }
-
-    updateCamRow(map, liveCount) {
-        const me = this,
-            element = me._container && me._container.querySelector('.go-layer-cam-count');
-
-        if (element) {
-            element.textContent = `${liveCount} of ${map.liveCamTotal || liveCount} live`;
-        }
     }
 
 }
